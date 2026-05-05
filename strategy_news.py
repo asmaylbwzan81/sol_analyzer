@@ -1,37 +1,59 @@
 import requests
-import os
+import xml.etree.ElementTree as ET
 
-CRYPTOPANIC_KEY = os.getenv("CRYPTOPANIC_KEY", "")
+NEWS_SOURCES = [
+    "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "https://cointelegraph.com/rss",
+]
 
-def analyze(symbol="ETH-USDT"):
-    coin = symbol.replace("-USDT", "").replace("-BUSD", "")
+KEYWORDS_POSITIVE = [
+    "bull", "surge", "rally", "gain", "rise", "adoption",
+    "partnership", "upgrade", "bullish", "pump", "ath"
+]
 
-    try:
-        url = f"https://cryptopanic.com/api/v1/posts/?auth_token={CRYPTOPANIC_KEY}&currencies={coin}&filter=hot"
-        data = requests.get(url, timeout=5).json()
-        posts = data.get("results", [])
+KEYWORDS_NEGATIVE = [
+    "bear", "crash", "drop", "fall", "hack", "ban",
+    "lawsuit", "bearish", "dump", "sell", "risk"
+]
 
-        if not posts:
-            return 0.5
+def analyze(symbol: str) -> float:
+    positive = 0
+    negative = 0
 
-        bullish = sum(1 for p in posts if p.get("votes", {}).get("positive", 0) > p.get("votes", {}).get("negative", 0))
-        bearish = sum(1 for p in posts if p.get("votes", {}).get("negative", 0) > p.get("votes", {}).get("positive", 0))
-        total = bullish + bearish
+    for url in NEWS_SOURCES:
+        try:
+            r = requests.get(url, timeout=10)
+            root = ET.fromstring(r.content)
+            for item in root.iter("item"):
+                title = item.find("title")
+                if title is None:
+                    continue
+                title = title.text.lower()
+                if symbol.lower() not in title:
+                    continue
+                for word in KEYWORDS_POSITIVE:
+                    if word in title:
+                        positive += 1
+                        break
+                for word in KEYWORDS_NEGATIVE:
+                    if word in title:
+                        negative += 1
+                        break
+        except:
+            continue
 
-        if total == 0:
-            return 0.5
-
-        score = bullish / total
-
-        if score > 0.7:
-            return 0.80
-        elif score > 0.5:
-            return 0.60
-        elif score < 0.3:
-            return 0.20
-        elif score < 0.5:
-            return 0.40
+    total = positive + negative
+    if total == 0:
         return 0.5
 
-    except:
-        return 0.5
+    score = positive / total
+
+    if score > 0.7:
+        return 0.80
+    elif score > 0.5:
+        return 0.60
+    elif score < 0.3:
+        return 0.20
+    elif score < 0.5:
+        return 0.40
+    return 0.5
