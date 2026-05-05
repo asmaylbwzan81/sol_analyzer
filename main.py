@@ -84,8 +84,16 @@ def analyze_symbol(symbol, interval):
         print(f"DEBUG action={action} direction={direction}")
 
         sl_long, sl_short, tp_long, tp_short = get_levels(candles)
-        sl = sl_long if str(direction) == "LONG" else sl_short
-        tp = tp_long if str(direction) == "LONG" else tp_short
+
+        if str(direction) == "LONG":
+            sl = sl_long
+            tp = tp_long
+        elif str(direction) == "SHORT":
+            sl = sl_short
+            tp = tp_short
+        else:
+            sl = None
+            tp = None
 
         ai_advice = review(scores, final_score, direction, price)
 
