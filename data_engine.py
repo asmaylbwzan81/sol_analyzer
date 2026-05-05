@@ -3,11 +3,12 @@ import random
 
 BINGX_BASE = "https://open-api.bingx.com"
 
-def get_klines(symbol="ETH-USDT", interval="1h", limit=100):
+def get_klines(symbol="ETH", interval="1h", limit=100):
     try:
+        full_symbol = f"{symbol}-USDT"
         url = f"{BINGX_BASE}/openApi/swap/v2/quote/klines"
         params = {
-            "symbol": symbol,
+            "symbol": full_symbol,
             "interval": interval,
             "limit": limit
         }
@@ -17,11 +18,12 @@ def get_klines(symbol="ETH-USDT", interval="1h", limit=100):
     except:
         return [100 + random.uniform(-1, 1) for _ in range(limit)]
 
-def get_candles(symbol="ETH-USDT", interval="1h", limit=100):
+def get_candles(symbol="ETH", interval="1h", limit=100):
     try:
+        full_symbol = f"{symbol}-USDT"
         url = f"{BINGX_BASE}/openApi/swap/v2/quote/klines"
         params = {
-            "symbol": symbol,
+            "symbol": full_symbol,
             "interval": interval,
             "limit": limit
         }
