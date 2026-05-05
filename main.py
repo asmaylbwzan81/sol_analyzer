@@ -27,8 +27,8 @@ SYMBOLS = [
     "BNB", "ADA", "LINK", "TON", "AVAX"
 ]
 
-INTERVALS = ["1d", "4h", "1h", "5m"]
-SLEEP = 600 # 10 دقايق
+INTERVALS = ["1d", "4h", "1h"]
+SLEEP = 600
 
 def generate_signal_id():
     return str(uuid.uuid4())[:8].upper()
