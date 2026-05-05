@@ -27,7 +27,9 @@ SYMBOLS = [
     "BNB", "ADA", "LINK", "TON", "AVAX"
 ]
 
-INTERVALS = ["1d", "4h", "1h"]
+ ind_1h = calc_indicators(tfs["1h"])
+                ind_4h = calc_indicators(tfs["4h"])
+                ind_1d = calc_indicators(tfs["1d"])
 SLEEP = 600
 
 def generate_signal_id():
