@@ -17,7 +17,8 @@ def get_levels(candles):
     if not atr:
         return None, None, None, None
 
-    price = candles[-1]["close"]
+    price = float(candles[-1]["close"])
+    atr = float(atr)
 
     sl_long = round(price - atr * 1.0, 4)
     sl_short = round(price + atr * 1.0, 4)
