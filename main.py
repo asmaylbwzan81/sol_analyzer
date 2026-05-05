@@ -25,7 +25,7 @@ from notifier import send_signal
 
 SYMBOLS = [
     "BTC", "ETH", "SOL", "XRP", "DOGE",
-    "BNB", "ADA", "LINK", "TON", "AVAX"
+    "BNB", "ADA", "LINK", "AVAX"
 ]
 
 INTERVALS = ["1d", "4h", "1h"]
