@@ -23,28 +23,20 @@ from ai_reviewer import review
 from notifier import send_signal
 
 SYMBOLS = [
-    "BTC-USDT",
-    "ETH-USDT",
-    "SOL-USDT",
-    "BNB-USDT",
-    "XRP-USDT",
-    "DOGE-USDT",
-    "ADA-USDT",
-    "AVAX-USDT",
-    "LINK-USDT",
-    "DOT-USDT",
+    "BTC", "ETH", "SOL", "XRP", "DOGE",
+    "BNB", "ADA", "LINK", "TON", "AVAX"
 ]
 
-INTERVAL = "1h"
-SLEEP = 60
+INTERVALS = ["1d", "4h", "1h", "5m"]
+SLEEP = 600 # 10 دقايق
 
 def generate_signal_id():
     return str(uuid.uuid4())[:8].upper()
 
-def analyze_symbol(symbol):
+def analyze_symbol(symbol, interval):
     try:
-        prices = get_klines(symbol, INTERVAL)
-        candles = get_candles(symbol, INTERVAL)
+        prices = get_klines(symbol, interval)
+        candles = get_candles(symbol, interval)
         price = prices[-1]
 
         scores = {
@@ -73,7 +65,7 @@ def analyze_symbol(symbol):
 
         ai_advice = review(scores, final_score, direction, price)
 
-        print(f"\n🪙 {symbol}")
+        print(f"\n🪙 {symbol} | ⏱ {interval}")
         print(f"💰 Price: {price} | ⚖️ Score: {round(final_score, 2)}")
         print(f"📌 Action: {action} {direction}")
         print(f"🛑 SL: {sl} | 🎯 TP: {tp}")
@@ -87,18 +79,19 @@ def analyze_symbol(symbol):
             print("⏭️ No Trade")
 
     except Exception as e:
-        print(f"❌ Error {symbol}: {e}")
+        print(f"❌ Error {symbol} {interval}: {e}")
 
 def main():
     print("🚀 Smart Analyzer Bot Started")
-    print(f"📊 Symbols: {len(SYMBOLS)} | Interval: {INTERVAL}")
+    print(f"📊 Symbols: {len(SYMBOLS)} | Intervals: {INTERVALS}")
     print("━" * 40)
 
     while True:
         print(f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         for symbol in SYMBOLS:
-            analyze_symbol(symbol)
-            time.sleep(2)
+            for interval in INTERVALS:
+                analyze_symbol(symbol, interval)
+                time.sleep(1)
         print("━" * 40)
         time.sleep(SLEEP)
 
