@@ -1,19 +1,20 @@
-import redis
-import json
+from upstash_redis import Redis
 import os
+import json
 
-REDIS_URL = os.getenv("REDIS_URL", "")
+UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL", "")
+UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 
 def send_signal(signal_id, symbol, direction, score, price, ai_advice, scores, sl, tp):
     try:
-        r = redis.from_url(REDIS_URL)
+        r = Redis(url=UPSTASH_URL, token=UPSTASH_TOKEN)
 
         emoji = "📈" if direction == "LONG" else "📉"
         confidence = int(score * 100)
 
         msg = f"""🤖 SMART ANALYZER SIGNAL
 ━━━━━━━━━━━━━━
-🆔 ID: `{signal_id}`
+🆔 ID: {signal_id}
 🪙 Symbol: {symbol}
 {emoji} Direction: {direction}
 💪 Confidence: {confidence}/100
