@@ -22,70 +22,84 @@ from strategy_atr import get_levels
 from ai_reviewer import review
 from notifier import send_signal
 
-SYMBOL = "ETH-USDT"
+SYMBOLS = [
+    "BTC-USDT",
+    "ETH-USDT",
+    "SOL-USDT",
+    "BNB-USDT",
+    "XRP-USDT",
+    "DOGE-USDT",
+    "ADA-USDT",
+    "AVAX-USDT",
+    "LINK-USDT",
+    "DOT-USDT",
+]
+
 INTERVAL = "1h"
 SLEEP = 60
 
 def generate_signal_id():
     return str(uuid.uuid4())[:8].upper()
 
+def analyze_symbol(symbol):
+    try:
+        prices = get_klines(symbol, INTERVAL)
+        candles = get_candles(symbol, INTERVAL)
+        price = prices[-1]
+
+        scores = {
+            "rsi": rsi_analyze(prices),
+            "macd": macd_analyze(prices),
+            "ema": ema_analyze(prices),
+            "bollinger": bollinger_analyze(prices),
+            "volume": volume_analyze(candles),
+            "momentum": momentum_analyze(prices),
+            "sr": sr_analyze(prices),
+            "pattern": pattern_analyze(candles),
+            "stochastic": stochastic_analyze(candles),
+            "vwap": vwap_analyze(candles),
+            "adx": adx_analyze(candles),
+            "fibonacci": fib_analyze(prices),
+            "news": news_analyze(symbol),
+            "memory": memory_analyze(symbol),
+        }
+
+        final_score = vote(scores)
+        action, direction = decision(final_score)
+
+        sl_long, sl_short, tp_long, tp_short = get_levels(candles)
+        sl = sl_long if str(direction) == "LONG" else sl_short
+        tp = tp_long if str(direction) == "LONG" else tp_short
+
+        ai_advice = review(scores, final_score, direction, price)
+
+        print(f"\n🪙 {symbol}")
+        print(f"💰 Price: {price} | ⚖️ Score: {round(final_score, 2)}")
+        print(f"📌 Action: {action} {direction}")
+        print(f"🛑 SL: {sl} | 🎯 TP: {tp}")
+
+        if action == "ENTER":
+            signal_id = generate_signal_id()
+            save_signal(signal_id, symbol, direction, final_score, price)
+            send_signal(signal_id, symbol, direction, final_score, price, ai_advice, scores, sl, tp)
+            print(f"✅ Signal Sent! ID: {signal_id}")
+        else:
+            print("⏭️ No Trade")
+
+    except Exception as e:
+        print(f"❌ Error {symbol}: {e}")
+
 def main():
     print("🚀 Smart Analyzer Bot Started")
-    print(f"📊 Symbol: {SYMBOL} | Interval: {INTERVAL}")
+    print(f"📊 Symbols: {len(SYMBOLS)} | Interval: {INTERVAL}")
     print("━" * 40)
 
     while True:
-        try:
-            prices = get_klines(SYMBOL, INTERVAL)
-            candles = get_candles(SYMBOL, INTERVAL)
-            price = prices[-1]
-
-            scores = {
-                "rsi": rsi_analyze(prices),
-                "macd": macd_analyze(prices),
-                "ema": ema_analyze(prices),
-                "bollinger": bollinger_analyze(prices),
-                "volume": volume_analyze(candles),
-                "momentum": momentum_analyze(prices),
-                "sr": sr_analyze(prices),
-                "pattern": pattern_analyze(candles),
-                "stochastic": stochastic_analyze(candles),
-                "vwap": vwap_analyze(candles),
-                "adx": adx_analyze(candles),
-                "fibonacci": fib_analyze(prices),
-                "news": news_analyze(SYMBOL),
-                "memory": memory_analyze(SYMBOL),
-            }
-
-            final_score = vote(scores)
-            action, direction = decision(final_score)
-
-            sl_long, sl_short, tp_long, tp_short = get_levels(candles)
-            sl = sl_long if direction == "LONG" else sl_short
-            tp = tp_long if direction == "LONG" else tp_short
-
-            ai_advice = review(scores, final_score, direction, price)
-
-            print(f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            print(f"💰 Price: {price}")
-            print(f"⚖️ Score: {round(final_score, 2)}")
-            print(f"📌 Action: {action} {direction}")
-            print(f"🛑 SL: {sl} | 🎯 TP: {tp}")
-            print(f"🤖 AI: {ai_advice}")
-
-            if action == "ENTER":
-                signal_id = generate_signal_id()
-                save_signal(signal_id, SYMBOL, direction, final_score, price)
-                send_signal(signal_id, SYMBOL, direction, final_score, price, ai_advice, scores, sl, tp)
-                print(f"✅ Signal Sent! ID: {signal_id}")
-            else:
-                print("⏭️ No Trade")
-
-            print("━" * 40)
-
-        except Exception as e:
-            print(f"❌ Error: {e}")
-
+        print(f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        for symbol in SYMBOLS:
+            analyze_symbol(symbol)
+            time.sleep(2)
+        print("━" * 40)
         time.sleep(SLEEP)
 
 if __name__ == "__main__":
