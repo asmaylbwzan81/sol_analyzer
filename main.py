@@ -21,7 +21,7 @@ from strategy_news import analyze as news_analyze
 from strategy_memory import analyze as memory_analyze, save_signal
 from strategy_atr import get_levels
 from ai_reviewer import review
-from notifier import send_signal
+from notifier import send_signal, check_result # ← أضفنا check_result
 
 SYMBOLS = [
     "BTC", "ETH", "SOL", "XRP", "DOGE",
@@ -119,6 +119,10 @@ def main():
 
     while True:
         print(f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # ← تحقق من نتائج الصفقات السابقة وحدث الأوزان
+        check_result()
+
         for symbol in SYMBOLS:
             analyze_symbol(symbol)
             time.sleep(2)
@@ -127,3 +131,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
