@@ -30,7 +30,7 @@ ALL_STRATEGIES: List[str] = [
     "rsi", "macd", "ema", "bollinger", "volume",
     "momentum", "support_resistance", "pattern",
     "stochastic", "vwap", "adx", "fibonacci",
-    "news", "memory",
+    "news", "memory", "supertrend",
 ]
 
 
@@ -251,9 +251,9 @@ if __name__ == "__main__":
     # 3. حساب الـ score المرجّح
     score = weighted_score(test_signals)
     print(f"\n🎯 Weighted Score: {score}")
-    if score >= 0.70:
+    if score >= 0.65:
         print(" → قرار: LONG ✅")
-    elif score <= 0.30:
+    elif score <= 0.35:
         print(" → قرار: SHORT 🔴")
     else:
         print(" → قرار: SKIP ⏭️")
