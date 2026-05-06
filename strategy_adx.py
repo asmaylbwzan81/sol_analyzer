@@ -29,9 +29,27 @@ def analyze(candles, period=14):
     dx = abs(plus_di - minus_di) / (plus_di + minus_di) * 100 if (plus_di + minus_di) > 0 else 0
     adx = dx
 
-    if adx > 25:
+    # قوة الترند + اتجاهه
+    if adx > 40:
         if plus_di > minus_di:
-            return 0.80
+            return 0.95 # ترند صاعد قوي جداً
         else:
-            return 0.20
-    return 0.5
+            return 0.05 # ترند نازل قوي جداً
+    elif adx > 30:
+        if plus_di > minus_di:
+            return 0.85 # ترند صاعد قوي
+        else:
+            return 0.15 # ترند نازل قوي
+    elif adx > 25:
+        if plus_di > minus_di:
+            return 0.75 # ترند صاعد واضح
+        else:
+            return 0.25 # ترند نازل واضح
+    elif adx > 20:
+        if plus_di > minus_di:
+            return 0.65 # ترند صاعد خفيف
+        else:
+            return 0.35 # ترند نازل خفيف
+    else:
+        return 0.50 # لا يوجد ترند واضح → محايد
+
