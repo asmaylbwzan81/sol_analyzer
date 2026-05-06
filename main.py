@@ -21,7 +21,7 @@ from strategy_news import analyze as news_analyze
 from strategy_memory import analyze as memory_analyze, save_signal
 from strategy_atr import get_levels
 from ai_reviewer import review
-from notifier import send_signal, check_result # ← أضفنا check_result
+from notifier import send_signal, check_result
 
 SYMBOLS = [
     "BTC", "ETH", "SOL", "XRP", "DOGE",
@@ -47,7 +47,7 @@ def get_scores(symbol, interval):
             "momentum": momentum_analyze(prices),
             "sr": sr_analyze(prices),
             "pattern": pattern_analyze(candles),
-            "stochastic": stochastic_analyze(candles),
+            "stochastic":stochastic_analyze(candles),
             "vwap": vwap_analyze(candles),
             "adx": adx_analyze(candles),
             "fibonacci": fib_analyze(prices),
@@ -83,28 +83,29 @@ def analyze_symbol(symbol):
         sl_long, sl_short, tp_long, tp_short = get_levels(candles)
 
         if str(direction) == "LONG":
-            sl = sl_long
-            tp = tp_long
+            sl, tp = sl_long, tp_long
         elif str(direction) == "SHORT":
-            sl = sl_short
-            tp = tp_short
+            sl, tp = sl_short, tp_short
         else:
-            sl = None
-            tp = None
+            sl, tp = None, None
 
-        ai_advice = review(combined, final_score, direction, price)
+        # ← Groq يراجع ويعطي APPROVE أو REJECT
+        verdict, ai_advice = review(combined, final_score, direction, price)
 
         print(f"\n🪙 {symbol}")
         print(f"💰 Price: {price} | ⚖️ Score: {round(final_score, 2)}")
         print(f"📌 Action: {action} {direction}")
         print(f"🛑 SL: {sl} | 🎯 TP: {tp}")
-        print(f"🤖 AI: {ai_advice}")
+        print(f"🤖 AI Verdict: {verdict}")
+        print(f"💬 AI Advice: {ai_advice}")
 
-        if action == "ENTER":
+        if action == "ENTER" and verdict == "APPROVE":
             signal_id = generate_signal_id()
             save_signal(signal_id, symbol, direction, final_score, price)
             send_signal(signal_id, symbol, direction, final_score, price, ai_advice, combined, sl, tp)
             print(f"✅ Signal Sent! ID: {signal_id}")
+        elif action == "ENTER" and verdict == "REJECT":
+            print(f"🚫 AI رفض الإشارة! السبب: {ai_advice}")
         else:
             print("⏭️ No Trade")
 
@@ -120,7 +121,6 @@ def main():
     while True:
         print(f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-        # ← تحقق من نتائج الصفقات السابقة وحدث الأوزان
         check_result()
 
         for symbol in SYMBOLS:
