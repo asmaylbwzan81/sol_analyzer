@@ -21,7 +21,7 @@ from strategy_news import analyze as news_analyze
 from strategy_memory import analyze as memory_analyze, save_signal
 from strategy_atr import get_levels
 from ai_reviewer import review
-from notifier import send_signal, check_result
+from notifier import send_signal, check_result, send_startup # ← أضفنا check_result
 
 SYMBOLS = [
     "BTC", "ETH", "SOL", "XRP", "DOGE",
@@ -47,7 +47,7 @@ def get_scores(symbol, interval):
             "momentum": momentum_analyze(prices),
             "sr": sr_analyze(prices),
             "pattern": pattern_analyze(candles),
-            "stochastic":stochastic_analyze(candles),
+            "stochastic": stochastic_analyze(candles),
             "vwap": vwap_analyze(candles),
             "adx": adx_analyze(candles),
             "fibonacci": fib_analyze(prices),
@@ -83,13 +83,15 @@ def analyze_symbol(symbol):
         sl_long, sl_short, tp_long, tp_short = get_levels(candles)
 
         if str(direction) == "LONG":
-            sl, tp = sl_long, tp_long
+            sl = sl_long
+            tp = tp_long
         elif str(direction) == "SHORT":
-            sl, tp = sl_short, tp_short
+            sl = sl_short
+            tp = tp_short
         else:
-            sl, tp = None, None
+            sl = None
+            tp = None
 
-        # ← Groq يراجع ويعطي APPROVE أو REJECT
         verdict, ai_advice = review(combined, final_score, direction, price)
 
         print(f"\n🪙 {symbol}")
@@ -117,10 +119,12 @@ def main():
     print("🚀 Smart Analyzer Bot Started")
     print(f"📊 Symbols: {len(SYMBOLS)}")
     print("━" * 40)
+    send_startup() # ← إشعار بوت التنفيذ
 
     while True:
         print(f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
+        # ← تحقق من نتائج الصفقات السابقة وحدث الأوزان
         check_result()
 
         for symbol in SYMBOLS:
