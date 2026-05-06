@@ -35,4 +35,3 @@ def analyze(prices, period=20):
         return 0.15 # قريب جداً من العلوي → SHORT قوي
     else:
         return 0.05 # فوق النطاق العلوي → SHORT قوي جداً
-
