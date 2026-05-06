@@ -14,21 +14,41 @@ def send_signal(signal_id, symbol, direction, score, price, ai_advice, scores, s
     try:
         r = Redis(url=UPSTASH_URL, token=UPSTASH_TOKEN)
 
+        # تحويل score (0.0-1.0) إلى confidence (0-100)
+        confidence = int(score * 100)
+
+        # تحديد trend من الـ scores
+        if score >= 0.60:
+            trend = "UPTREND"
+        elif score <= 0.40:
+            trend = "DOWNTREND"
+        else:
+            trend = "RANGING"
+
         signal = {
+            # ── حقول بوت التنفيذ ──
             "signal_id": signal_id,
             "symbol": f"{symbol}-USDT",
             "direction": direction,
-            "score": round(score, 2),
+            "confidence": confidence,
             "price": price,
             "sl": sl,
-            "tp": tp,
+            "tp1": tp,
+            "rsi": round(scores.get("rsi", 0.5) * 100, 1),
+            "adx": round(scores.get("adx", 0.5) * 100, 1),
+            "trend": trend,
+            "atr": abs(price - sl) if sl else 0,
+            "market_state": "trending" if score >= 0.65 or score <= 0.35 else "ranging",
+
+            # ── حقول إضافية ──
+            "score": round(score, 2),
             "ai_advice": ai_advice,
             "status": "pending",
-            "strategies_used": list(scores.keys()), # ← جديد
+            "strategies_used": list(scores.keys()),
         }
 
         r.set(SIGNAL_KEY, json.dumps(signal))
-        print(f"✅ Signal sent to Redis: {signal_id}")
+        print(f"✅ Signal sent to Redis: {signal_id} | Confidence: {confidence}%")
 
     except Exception as e:
         print(f"❌ Redis Error: {e}")
