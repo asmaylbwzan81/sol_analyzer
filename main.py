@@ -19,6 +19,7 @@ from strategy_adx import analyze as adx_analyze
 from strategy_fibonacci import analyze as fib_analyze
 from strategy_news import analyze as news_analyze
 from strategy_memory import analyze as memory_analyze, save_signal
+from strategy_supertrend import analyze as supertrend_analyze
 from strategy_atr import get_levels
 from ai_reviewer import review
 from notifier import send_signal, check_result, send_startup # ← أضفنا check_result
@@ -53,6 +54,7 @@ def get_scores(symbol, interval):
             "fibonacci": fib_analyze(prices),
             "news": news_analyze(symbol),
             "memory": memory_analyze(symbol),
+            "supertrend": supertrend_analyze(candles),
         }
         return scores, candles, prices[-1]
     except Exception as e:
