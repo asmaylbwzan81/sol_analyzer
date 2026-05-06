@@ -54,6 +54,18 @@ def send_signal(signal_id, symbol, direction, score, price, ai_advice, scores, s
         print(f"❌ Redis Error: {e}")
 
 
+def send_startup():
+    """يرسل رسالة على Redis عند بداية تشغيل بوت التحليل."""
+    try:
+        r = Redis(url=UPSTASH_URL, token=UPSTASH_TOKEN)
+        r.set("bot:startup", json.dumps({
+            "msg": "🤖 بوت التحليل الجديد شغال وجاهز!"
+        }))
+        print("✅ Startup message sent to Redis")
+    except Exception as e:
+        print(f"❌ Startup Error: {e}")
+
+
 def check_result():
     """
     يقرأ نتيجة الصفقة من Redis ويحدث أوزان الاستراتيجيات.
