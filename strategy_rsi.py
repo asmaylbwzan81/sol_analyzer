@@ -16,12 +16,23 @@ def analyze(prices, period=14):
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
 
-    if rsi < 30:
-        return 0.85
+    # ── قيم أكثر تفصيلاً ──
+    if rsi < 20:
+        return 0.95 # oversold قوي جداً → LONG قوي
+    elif rsi < 30:
+        return 0.85 # oversold قوي → LONG
     elif rsi < 40:
-        return 0.65
-    elif rsi > 70:
-        return 0.15
-    elif rsi > 60:
-        return 0.35
-    return 0.5
+        return 0.70 # oversold خفيف → LONG محتمل
+    elif rsi < 45:
+        return 0.60 # تحت المحايد قليلاً
+    elif rsi < 55:
+        return 0.50 # محايد
+    elif rsi < 60:
+        return 0.40 # فوق المحايد قليلاً
+    elif rsi < 70:
+        return 0.30 # overbought خفيف → SHORT محتمل
+    elif rsi < 80:
+        return 0.15 # overbought قوي → SHORT
+    else:
+        return 0.05 # overbought قوي جداً → SHORT قوي
+
