@@ -25,8 +25,8 @@ def decision(score: float):
     يحدد قرار الدخول بناءً على الـ score.
     Returns: ("ENTER", "LONG") | ("ENTER", "SHORT") | ("SKIP", "NEUTRAL")
     """
-    if score >= 0.70:
+    if score >= 0.65:
         return "ENTER", "LONG"
-    elif score <= 0.30:
+    elif score <= 0.35:
         return "ENTER", "SHORT"
     return "SKIP", "NEUTRAL"
