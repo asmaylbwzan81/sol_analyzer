@@ -35,4 +35,3 @@ def analyze(prices, period=14):
         return 0.15 # overbought قوي → SHORT
     else:
         return 0.05 # overbought قوي جداً → SHORT قوي
-
