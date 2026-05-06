@@ -9,13 +9,28 @@ def analyze(candles, period=20):
     prev_close = candles[-2]["close"]
 
     is_up = curr_close > prev_close
-    high_vol = curr_vol > avg_vol * 1.5
+    vol_ratio = curr_vol / avg_vol # نسبة الحجم مقارنة بالمتوسط
 
-    if is_up and high_vol:
-        return 0.85
-    elif not is_up and high_vol:
-        return 0.15
-    elif is_up:
-        return 0.60
+    if is_up:
+        if vol_ratio > 3.0:
+            return 0.95 # صعود بحجم ضخم جداً
+        elif vol_ratio > 2.0:
+            return 0.85 # صعود بحجم ضخم
+        elif vol_ratio > 1.5:
+            return 0.75 # صعود بحجم عالي
+        elif vol_ratio > 1.0:
+            return 0.65 # صعود بحجم طبيعي
+        else:
+            return 0.55 # صعود بحجم ضعيف
     else:
-        return 0.40
+        if vol_ratio > 3.0:
+            return 0.05 # نزول بحجم ضخم جداً
+        elif vol_ratio > 2.0:
+            return 0.15 # نزول بحجم ضخم
+        elif vol_ratio > 1.5:
+            return 0.25 # نزول بحجم عالي
+        elif vol_ratio > 1.0:
+            return 0.35 # نزول بحجم طبيعي
+        else:
+            return 0.45 # نزول بحجم ضعيف
+
