@@ -34,54 +34,51 @@ SLEEP = 600
 def generate_signal_id():
     return str(uuid.uuid4())[:8].upper()
 
-def analyze_symbol(symbol, interval):
+def get_scores(symbol, interval):
     try:
         prices = get_klines(symbol, interval)
         candles = get_candles(symbol, interval)
-        price = prices[-1]
-
-        rsi_s = rsi_analyze(prices)
-        macd_s = macd_analyze(prices)
-        ema_s = ema_analyze(prices)
-        boll_s = bollinger_analyze(prices)
-        vol_s = volume_analyze(candles)
-        mom_s = momentum_analyze(prices)
-        sr_s = sr_analyze(prices)
-        pat_s = pattern_analyze(candles)
-        stoch_s = stochastic_analyze(candles)
-        vwap_s = vwap_analyze(candles)
-        adx_s = adx_analyze(candles)
-        fib_s = fib_analyze(prices)
-        news_s = news_analyze(symbol)
-        mem_s = memory_analyze(symbol)
-
-        print(f"DEBUG {symbol} {interval}: rsi={rsi_s} macd={macd_s} ema={ema_s} boll={boll_s}")
-        print(f"DEBUG {symbol} {interval}: vol={vol_s} mom={mom_s} sr={sr_s} pat={pat_s}")
-        print(f"DEBUG {symbol} {interval}: stoch={stoch_s} vwap={vwap_s} adx={adx_s} fib={fib_s}")
-        print(f"DEBUG {symbol} {interval}: news={news_s} mem={mem_s}")
-
         scores = {
-            "rsi": rsi_s,
-            "macd": macd_s,
-            "ema": ema_s,
-            "bollinger": boll_s,
-            "volume": vol_s,
-            "momentum": mom_s,
-            "sr": sr_s,
-            "pattern": pat_s,
-            "stochastic": stoch_s,
-            "vwap": vwap_s,
-            "adx": adx_s,
-            "fibonacci": fib_s,
-            "news": news_s,
-            "memory": mem_s,
+            "rsi": rsi_analyze(prices),
+            "macd": macd_analyze(prices),
+            "ema": ema_analyze(prices),
+            "bollinger": bollinger_analyze(prices),
+            "volume": volume_analyze(candles),
+            "momentum": momentum_analyze(prices),
+            "sr": sr_analyze(prices),
+            "pattern": pattern_analyze(candles),
+            "stochastic": stochastic_analyze(candles),
+            "vwap": vwap_analyze(candles),
+            "adx": adx_analyze(candles),
+            "fibonacci": fib_analyze(prices),
+            "news": news_analyze(symbol),
+            "memory": memory_analyze(symbol),
         }
+        return scores, candles, prices[-1]
+    except Exception as e:
+        print(f"❌ Error {symbol} {interval}: {e}")
+        traceback.print_exc()
+        return None, None, None
 
-        final_score = vote(scores)
-        print(f"DEBUG final_score={final_score} type={type(final_score)}")
+def analyze_symbol(symbol):
+    try:
+        scores_1d, _, _ = get_scores(symbol, "1d")
+        scores_4h, _, _ = get_scores(symbol, "4h")
+        scores_1h, candles, price = get_scores(symbol, "1h")
 
+        if not scores_1h or not scores_4h or not scores_1d:
+            return
+
+        combined = {}
+        for key in scores_1h:
+            combined[key] = (
+                scores_1d[key] * 0.5 +
+                scores_4h[key] * 0.3 +
+                scores_1h[key] * 0.2
+            )
+
+        final_score = vote(combined)
         action, direction = decision(final_score)
-        print(f"DEBUG action={action} direction={direction}")
 
         sl_long, sl_short, tp_long, tp_short = get_levels(candles)
 
@@ -95,36 +92,36 @@ def analyze_symbol(symbol, interval):
             sl = None
             tp = None
 
-        ai_advice = review(scores, final_score, direction, price)
+        ai_advice = review(combined, final_score, direction, price)
 
-        print(f"\n🪙 {symbol} | ⏱ {interval}")
+        print(f"\n🪙 {symbol}")
         print(f"💰 Price: {price} | ⚖️ Score: {round(final_score, 2)}")
         print(f"📌 Action: {action} {direction}")
         print(f"🛑 SL: {sl} | 🎯 TP: {tp}")
+        print(f"🤖 AI: {ai_advice}")
 
         if action == "ENTER":
             signal_id = generate_signal_id()
             save_signal(signal_id, symbol, direction, final_score, price)
-            send_signal(signal_id, symbol, direction, final_score, price, ai_advice, scores, sl, tp)
+            send_signal(signal_id, symbol, direction, final_score, price, ai_advice, combined, sl, tp)
             print(f"✅ Signal Sent! ID: {signal_id}")
         else:
             print("⏭️ No Trade")
 
     except Exception as e:
-        print(f"❌ Error {symbol} {interval}: {e}")
+        print(f"❌ Error {symbol}: {e}")
         traceback.print_exc()
 
 def main():
     print("🚀 Smart Analyzer Bot Started")
-    print(f"📊 Symbols: {len(SYMBOLS)} | Intervals: {INTERVALS}")
+    print(f"📊 Symbols: {len(SYMBOLS)}")
     print("━" * 40)
 
     while True:
         print(f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         for symbol in SYMBOLS:
-            for interval in INTERVALS:
-                analyze_symbol(symbol, interval)
-                time.sleep(1)
+            analyze_symbol(symbol)
+            time.sleep(2)
         print("━" * 40)
         time.sleep(SLEEP)
 
