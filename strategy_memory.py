@@ -1,7 +1,13 @@
 import sqlite3
+import json
+import os
 from datetime import datetime
+from upstash_redis import Redis
 
 DB_FILE = "signals.db"
+
+UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL", "")
+UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 
 def setup_db():
     conn = sqlite3.connect(DB_FILE)
@@ -41,11 +47,37 @@ def update_result(signal_id, result, pnl):
     conn.commit()
     conn.close()
 
+def check_results_from_redis():
+    """يقرأ النتائج من Redis ويحدث الذاكرة"""
+    try:
+        r = Redis(url=UPSTASH_URL, token=UPSTASH_TOKEN)
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("SELECT signal_id FROM signals WHERE result IS NULL")
+        pending = c.fetchall()
+        conn.close()
+
+        for (signal_id,) in pending:
+            try:
+                data = r.get(f"result:{signal_id}")
+                if data:
+                    result_data = json.loads(str(data))
+                    result = result_data.get("result")
+                    pnl = result_data.get("pnl_pct", 0)
+                    if result in ["WIN", "LOSS", "REJECTED"]:
+                        update_result(signal_id, result, pnl)
+                        print(f"✅ تحديث الذاكرة: {signal_id} = {result}")
+            except:
+                continue
+    except Exception as e:
+        print(f"⚠️ خطأ قراءة النتائج: {e}")
+
 def analyze(symbol):
     setup_db()
+    check_results_from_redis()
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT result FROM signals WHERE symbol=? AND result IS NOT NULL", (symbol,))
+    c.execute("SELECT result FROM signals WHERE symbol=? AND result IN ('WIN', 'LOSS')", (symbol,))
     data = c.fetchall()
     conn.close()
 
