@@ -8,6 +8,9 @@ def review(scores, final_score, direction, price):
     if not GROQ_API_KEY:
         return "⚠️ No Groq API Key"
 
+    strongest = max(scores, key=scores.get)
+    weakest = min(scores, key=scores.get)
+
     prompt = f"""
 أنت مراجع تداول ذكي. مهمتك مراجعة قرار التداول وإعطاء نصيحة قصيرة.
 
@@ -15,11 +18,13 @@ def review(scores, final_score, direction, price):
 - السعر الحالي: {price}
 - الاتجاه المقترح: {direction}
 - النتيجة النهائية: {round(final_score, 2)}
+- أقوى مؤشر: {strongest} = {round(scores[strongest], 2)}
+- أضعف مؤشر: {weakest} = {round(scores[weakest], 2)}
 - نتائج الاستراتيجيات: {json.dumps(scores, indent=2)}
 
 اعطني:
 1. هل القرار منطقي؟
-2. ما أبرز نقطة تدعم أو تعارض القرار؟
+2. أذكر أقوى مؤشر يدعم أو يعارض القرار
 3. نصيحة واحدة قصيرة
 
 الجواب بـ 3 أسطر فقط بالعربي.
