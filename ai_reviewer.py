@@ -39,7 +39,10 @@ def review(scores, final_score, direction, price):
             },
             timeout=10
         )
-        return res.json()["choices"][0]["message"]["content"].strip()
+        data = res.json()
+        if "choices" not in data:
+            return f"⚠️ Groq: {data.get('error', {}).get('message', 'خطأ غير معروف')}"
+        return data["choices"][0]["message"]["content"].strip()
 
     except Exception as e:
         return f"⚠️ Groq Error: {e}"
