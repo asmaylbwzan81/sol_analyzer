@@ -16,6 +16,7 @@ KEYWORDS_NEGATIVE = [
     "lawsuit", "bearish", "dump", "sell", "risk"
 ]
 
+
 def analyze(symbol: str) -> float:
     positive = 0
     negative = 0
@@ -48,12 +49,22 @@ def analyze(symbol: str) -> float:
 
     score = positive / total
 
-    if score > 0.7:
-        return 0.80
-    elif score > 0.5:
-        return 0.60
-    elif score < 0.3:
-        return 0.20
-    elif score < 0.5:
-        return 0.40
-    return 0.5
+    if score >= 0.90:
+        return 0.95 # أخبار إيجابية جداً جداً
+    elif score >= 0.75:
+        return 0.85 # أخبار إيجابية قوية
+    elif score >= 0.60:
+        return 0.75 # أخبار إيجابية واضحة
+    elif score >= 0.55:
+        return 0.65 # أخبار إيجابية خفيفة
+    elif score >= 0.45:
+        return 0.50 # أخبار محايدة
+    elif score >= 0.40:
+        return 0.40 # أخبار سلبية خفيفة
+    elif score >= 0.25:
+        return 0.30 # أخبار سلبية واضحة
+    elif score >= 0.10:
+        return 0.20 # أخبار سلبية قوية
+    else:
+        return 0.05 # أخبار سلبية جداً جداً
+
