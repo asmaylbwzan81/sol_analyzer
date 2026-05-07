@@ -251,9 +251,9 @@ if __name__ == "__main__":
     # 3. حساب الـ score المرجّح
     score = weighted_score(test_signals)
     print(f"\n🎯 Weighted Score: {score}")
-    if score >= 0.65:
+    if score >= 0.60:
         print(" → قرار: LONG ✅")
-    elif score <= 0.35:
+    elif score <= 0.40:
         print(" → قرار: SHORT 🔴")
     else:
         print(" → قرار: SKIP ⏭️")
