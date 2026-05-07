@@ -1,3 +1,4 @@
+
 import time
 import uuid
 import traceback
@@ -22,7 +23,7 @@ from strategy_memory import analyze as memory_analyze, save_signal
 from strategy_supertrend import analyze as supertrend_analyze
 from strategy_atr import get_levels
 from ai_reviewer import review
-from notifier import send_signal, check_result, send_startup # ← أضفنا check_result
+from notifier import send_signal, check_result, send_startup
 
 SYMBOLS = [
     "BTC", "ETH", "SOL", "XRP", "DOGE",
@@ -80,7 +81,7 @@ def analyze_symbol(symbol):
             )
 
         final_score = vote(combined)
-        action, direction = decision(final_score)
+        action, direction = decision(final_score, combined) # ← التغيير هنا
 
         sl_long, sl_short, tp_long, tp_short = get_levels(candles)
 
@@ -121,12 +122,11 @@ def main():
     print("🚀 Smart Analyzer Bot Started")
     print(f"📊 Symbols: {len(SYMBOLS)}")
     print("━" * 40)
-    send_startup() # ← إشعار بوت التنفيذ
+    send_startup()
 
     while True:
         print(f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-        # ← تحقق من نتائج الصفقات السابقة وحدث الأوزان
         check_result()
 
         for symbol in SYMBOLS:
