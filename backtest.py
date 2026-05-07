@@ -13,9 +13,9 @@ from strategy_weights import update_weights, init_db, get_stats, reset_all_weigh
 BINGX_BASE = "https://open-api.bingx.com"
 
 SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "ADA", "LINK", "AVAX"]
-INTERVAL = "1h"
+INTERVAL = "4h"
 LIMIT = 1000 # أقصى عدد شمعات
-FUTURE_CANDLES = 10 # نشوف بعد كم شمعة النتيجة
+FUTURE_CANDLES = 6 # نشوف بعد كم شمعة النتيجة
 
 # ─────────────────────────────────────────────
 # جلب البيانات التاريخية
