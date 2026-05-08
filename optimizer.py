@@ -276,54 +276,42 @@ def optimize_macd(all_candles):
     return {"macd_fast": best_fast, "macd_slow": best_slow, "macd_winrate": best_wr}
 
 
-def optimize_ema(all_candles):
-    print("\n📊 EMA — يجرب الإعدادات...")
-    from strategy_ema import ema
-    best_short, best_long, best_wr = 20, 50, 0
+# ✅ Ichimoku (بديل EMA)
+def optimize_ichimoku(all_candles):
+    print("\n📊 Ichimoku — يجرب الإعدادات...")
+    from strategy_ichimoku import analyze
+    best_t, best_k, best_s, best_wr = 9, 26, 52, 0
 
-    for short in range(10, 31):
-        for long in range(30, 71, 5):
-            if short >= long: continue
-            wrs = []
-            for candles in all_candles:
-                try:
-                    def ema_analyze(p, s=short, l=long):
-                        if len(p) < l: return 0.5
-                        ema_s = ema(p[-s:], s)
-                        ema_l = ema(p[-l:], l)
-                        price = p[-1]
-                        pct_s = (price - ema_s) / ema_s * 100
-                        pct_l = (price - ema_l) / ema_l * 100
-                        score = 0.5
-                        if pct_s > 3.0: score += 0.20
-                        elif pct_s > 1.5: score += 0.15
-                        elif pct_s > 0.5: score += 0.10
-                        elif pct_s > 0.0: score += 0.05
-                        elif pct_s > -0.5: score -= 0.05
-                        elif pct_s > -1.5: score -= 0.10
-                        elif pct_s > -3.0: score -= 0.15
-                        else: score -= 0.20
-                        if pct_l > 3.0: score += 0.20
-                        elif pct_l > 1.5: score += 0.15
-                        elif pct_l > 0.5: score += 0.10
-                        elif pct_l > 0.0: score += 0.05
-                        elif pct_l > -0.5: score -= 0.05
-                        elif pct_l > -1.5: score -= 0.10
-                        elif pct_l > -3.0: score -= 0.15
-                        else: score -= 0.20
-                        return max(0.0, min(1.0, score))
-                    wr = evaluate(candles, lambda p, s=short, l=long: ema_analyze(p, s, l), use_prices=True)
-                    wrs.append(wr)
-                except: pass
-            if not wrs: continue
-            avg_wr = sum(wrs) / len(wrs)
-            if avg_wr > best_wr:
-                best_wr = avg_wr
-                best_short = short
-                best_long = long
+    for t in [7, 9, 11]:
+        for k in [22, 26, 30]:
+            for s in [44, 52, 60]:
+                if t >= k or k >= s:
+                    continue
+                wrs = []
+                for candles in all_candles:
+                    try:
+                        wr = evaluate(
+                            candles,
+                            lambda c, t=t, k=k, s=s: analyze(c, tenkan=t, kijun=k, senkou_b=s),
+                            use_prices=False
+                        )
+                        wrs.append(wr)
+                    except:
+                        pass
+                if not wrs:
+                    continue
+                avg_wr = sum(wrs) / len(wrs)
+                if avg_wr > best_wr:
+                    best_wr = avg_wr
+                    best_t, best_k, best_s = t, k, s
 
-    print(f"✅ EMA | short={best_short}, long={best_long} | Win Rate: {best_wr:.1f}%")
-    return {"ema_short": best_short, "ema_long": best_long, "ema_winrate": best_wr}
+    print(f"✅ Ichimoku | tenkan={best_t}, kijun={best_k}, senkou_b={best_s} | Win Rate: {best_wr:.1f}%")
+    return {
+        "ichi_tenkan": best_t,
+        "ichi_kijun": best_k,
+        "ichi_senkou_b": best_s,
+        "ichi_winrate": best_wr
+    }
 
 
 def main():
@@ -353,7 +341,7 @@ def main():
     config.update(optimize_momentum(all_candles))
     config.update(optimize_sr(all_candles))
     config.update(optimize_macd(all_candles))
-    config.update(optimize_ema(all_candles))
+    config.update(optimize_ichimoku(all_candles)) # ✅ بديل EMA
 
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=4)
@@ -369,10 +357,10 @@ def main():
     print(f"Momentum | period={config['momentum_period']} | Win Rate: {config['momentum_winrate']:.1f}%")
     print(f"SR | period={config['sr_period']} | Win Rate: {config['sr_winrate']:.1f}%")
     print(f"MACD | fast={config['macd_fast']}, slow={config['macd_slow']} | Win Rate: {config['macd_winrate']:.1f}%")
-    print(f"EMA | short={config['ema_short']}, long={config['ema_long']} | Win Rate: {config['ema_winrate']:.1f}%")
+    print(f"Ichimoku | tenkan={config['ichi_tenkan']}, kijun={config['ichi_kijun']}, senkou_b={config['ichi_senkou_b']} | Win Rate: {config['ichi_winrate']:.1f}%")
+
     print("\n✅ تم حفظ الاعدادات في config.json")
     print("✅ البوت جاهز بافضل اعدادات!")
 
 if __name__ == "__main__":
     main()
-
