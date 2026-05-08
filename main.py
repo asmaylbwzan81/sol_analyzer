@@ -1,5 +1,4 @@
 
-
 import time
 import uuid
 import traceback
@@ -34,6 +33,63 @@ SYMBOLS = [
 
 SLEEP = 600
 MIN_RANK = 0.60 # الحد الأدنى للـ rank عشان تُبعث
+
+def quick_rsi(prices, period=14):
+    """حساب RSI سريع"""
+    if len(prices) < period + 1:
+        return 50
+    gains, losses = [], []
+    for i in range(1, period + 1):
+        diff = prices[-i] - prices[-i-1]
+        if diff > 0: gains.append(diff)
+        else: losses.append(abs(diff))
+    avg_gain = sum(gains) / period if gains else 0
+    avg_loss = sum(losses) / period if losses else 0
+    if avg_loss == 0: return 100
+    rs = avg_gain / avg_loss
+    return round(100 - (100 / (1 + rs)), 1)
+
+def quick_adx(candles, period=14):
+    """حساب ADX سريع"""
+    try:
+        if len(candles) < period + 1:
+            return 0
+        trs = []
+        for i in range(1, len(candles)):
+            h, l, pc = candles[i]["high"], candles[i]["low"], candles[i-1]["close"]
+            trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+        atr = sum(trs[-period:]) / period
+        if atr == 0: return 0
+        return round(min(sum(trs[-period:]) / (atr * period) * 25, 100), 1)
+    except:
+        return 0
+
+def quick_vol_ratio(candles, period=20):
+    """نسبة الحجم الحالي مقارنة بالمتوسط"""
+    try:
+        if len(candles) < period + 1:
+            return 1.0
+        avg_vol = sum(c["volume"] for c in candles[-period-1:-1]) / period
+        if avg_vol == 0: return 1.0
+        return round(candles[-1]["volume"] / avg_vol, 2)
+    except:
+        return 1.0
+
+def should_analyze(prices, candles):
+    """فلتر سريع — هل في سبب حقيقي للتحليل؟"""
+    rsi = quick_rsi(prices)
+    adx = quick_adx(candles)
+    vol_ratio = quick_vol_ratio(candles)
+    reason = []
+    if rsi < 35: reason.append(f"RSI oversold {rsi}")
+    if rsi > 65: reason.append(f"RSI overbought {rsi}")
+    if adx > 25: reason.append(f"ADX strong {adx}")
+    if vol_ratio > 1.5: reason.append(f"Volume spike {vol_ratio}x")
+    if reason:
+        print(f"✅ فلتر اجتاز: {' | '.join(reason)}")
+        return True
+    print(f"⏭️ فلتر: RSI={rsi} ADX={adx} Vol={vol_ratio}x — تخطي")
+    return False
 
 def generate_signal_id():
     return str(uuid.uuid4())[:8].upper()
@@ -89,9 +145,14 @@ def analyze_symbol(symbol):
     try:
         scores_1d, _, _ = get_scores(symbol, "1d")
         scores_4h, _, _ = get_scores(symbol, "4h")
-        scores_1h, candles, price = get_scores(symbol, "1h")
+        scores_1h, candles_1h, price = get_scores(symbol, "1h")
+        prices_1h = [c["close"] for c in candles_1h] if candles_1h else []
 
         if not scores_1h or not scores_4h or not scores_1d:
+            return None
+
+        # ── فلتر سريع قبل التحليل الكامل ──
+        if not should_analyze(prices_1h, candles_1h):
             return None
 
         combined = {}
@@ -105,7 +166,7 @@ def analyze_symbol(symbol):
         final_score = vote(combined)
         action, direction = decision(final_score, combined)
 
-        sl_long, sl_short, tp_long, tp_short = get_levels(candles)
+        sl_long, sl_short, tp_long, tp_short = get_levels(candles_1h)
 
         if direction == "LONG":
             sl, tp = sl_long, tp_long
