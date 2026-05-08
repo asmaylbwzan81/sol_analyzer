@@ -1,13 +1,19 @@
-def analyze(candles, period=10, multiplier=3.0):
-    """
-    Supertrend Indicator
-    - period: فترة ATR (افتراضي 10)
-    - multiplier: مضاعف ATR (افتراضي 3.0)
-    """
+import json
+
+try:
+    with open("config.json") as f:
+        config = json.load(f)
+except:
+    config = {}
+
+def analyze(candles, period=None, multiplier=None):
+    period = period or config.get("supertrend_period", 10)
+    multiplier = multiplier or config.get("supertrend_mult", 3.0)
+
     if len(candles) < period + 1:
         return 0.5
 
-    # ── حساب ATR ──
+    # حساب ATR
     trs = []
     for i in range(1, len(candles)):
         high = float(candles[i]["high"])
@@ -18,7 +24,7 @@ def analyze(candles, period=10, multiplier=3.0):
 
     atr = sum(trs[-period:]) / period
 
-    # ── حساب الخطوط ──
+    # حساب الخطوط
     price = float(candles[-1]["close"])
     high = float(candles[-1]["high"])
     low = float(candles[-1]["low"])
@@ -27,43 +33,40 @@ def analyze(candles, period=10, multiplier=3.0):
     upper_band = hl2 + (multiplier * atr)
     lower_band = hl2 - (multiplier * atr)
 
-    # ── تحديد الاتجاه ──
+    # تحديد الاتجاه
     prev_close = float(candles[-2]["close"])
     prev_hl2 = (float(candles[-2]["high"]) + float(candles[-2]["low"])) / 2
     prev_upper = prev_hl2 + (multiplier * atr)
     prev_lower = prev_hl2 - (multiplier * atr)
 
-    # السعر فوق الخط السفلي = صاعد
-    # السعر تحت الخط العلوي = نازل
     if price > lower_band:
         trend = "UP"
     else:
         trend = "DOWN"
 
-    # ── حساب قوة الإشارة ──
-    # بعد السعر عن خط Supertrend
+    # حساب قوة الإشارة
     if trend == "UP":
         distance = (price - lower_band) / price * 100
         if distance > 3.0:
-            return 0.95 # صعود قوي جداً
+            return 0.95
         elif distance > 2.0:
-            return 0.85 # صعود قوي
+            return 0.85
         elif distance > 1.0:
-            return 0.75 # صعود واضح
+            return 0.75
         elif distance > 0.5:
-            return 0.65 # صعود خفيف
+            return 0.65
         else:
-            return 0.55 # بداية صعود
+            return 0.55
     else:
         distance = (upper_band - price) / price * 100
         if distance > 3.0:
-            return 0.05 # نزول قوي جداً
+            return 0.05
         elif distance > 2.0:
-            return 0.15 # نزول قوي
+            return 0.15
         elif distance > 1.0:
-            return 0.25 # نزول واضح
+            return 0.25
         elif distance > 0.5:
-            return 0.35 # نزول خفيف
+            return 0.35
         else:
-            return 0.45 # بداية نزول
+            return 0.45
 
