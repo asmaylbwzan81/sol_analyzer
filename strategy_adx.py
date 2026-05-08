@@ -1,4 +1,14 @@
-def analyze(candles, period=14):
+import json
+
+try:
+    with open("config.json") as f:
+        config = json.load(f)
+except:
+    config = {}
+
+def analyze(candles, period=None):
+    period = period or config.get("adx_period", 14)
+
     if len(candles) < period + 1:
         return 0.5
 
@@ -29,27 +39,26 @@ def analyze(candles, period=14):
     dx = abs(plus_di - minus_di) / (plus_di + minus_di) * 100 if (plus_di + minus_di) > 0 else 0
     adx = dx
 
-    # قوة الترند + اتجاهه
     if adx > 40:
         if plus_di > minus_di:
-            return 0.95 # ترند صاعد قوي جداً
+            return 0.95
         else:
-            return 0.05 # ترند نازل قوي جداً
+            return 0.05
     elif adx > 30:
         if plus_di > minus_di:
-            return 0.85 # ترند صاعد قوي
+            return 0.85
         else:
-            return 0.15 # ترند نازل قوي
+            return 0.15
     elif adx > 25:
         if plus_di > minus_di:
-            return 0.75 # ترند صاعد واضح
+            return 0.75
         else:
-            return 0.25 # ترند نازل واضح
+            return 0.25
     elif adx > 20:
         if plus_di > minus_di:
-            return 0.65 # ترند صاعد خفيف
+            return 0.65
         else:
-            return 0.35 # ترند نازل خفيف
+            return 0.35
     else:
-        return 0.50 # لا يوجد ترند واضح → محايد
+        return 0.50
 
