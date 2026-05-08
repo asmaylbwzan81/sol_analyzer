@@ -1,4 +1,14 @@
-def analyze(prices, period=20):
+import json
+
+try:
+    with open("config.json") as f:
+        config = json.load(f)
+except:
+    config = {}
+
+def analyze(prices, period=None):
+    period = period or config.get("bollinger_period", 20)
+
     if len(prices) < period:
         return 0.5
 
@@ -10,28 +20,28 @@ def analyze(prices, period=20):
     lower = avg - 2 * std
     price = prices[-1]
 
-    # نسبة موقع السعر داخل النطاق
     band_range = upper - lower
     if band_range == 0:
         return 0.5
 
-    position = (price - lower) / band_range # 0.0 = أسفل النطاق, 1.0 = أعلى النطاق
+    position = (price - lower) / band_range
 
     if price < lower:
-        return 0.95 # تحت النطاق السفلي → LONG قوي جداً
+        return 0.95
     elif position < 0.15:
-        return 0.85 # قريب جداً من السفلي → LONG قوي
+        return 0.85
     elif position < 0.30:
-        return 0.70 # في الربع السفلي → LONG محتمل
+        return 0.70
     elif position < 0.45:
-        return 0.60 # تحت المتوسط قليلاً
+        return 0.60
     elif position < 0.55:
-        return 0.50 # حول المتوسط → محايد
+        return 0.50
     elif position < 0.70:
-        return 0.40 # فوق المتوسط قليلاً
+        return 0.40
     elif position < 0.85:
-        return 0.30 # في الربع العلوي → SHORT محتمل
+        return 0.30
     elif position < 1.0:
-        return 0.15 # قريب جداً من العلوي → SHORT قوي
+        return 0.15
     else:
-        return 0.05 # فوق النطاق العلوي → SHORT قوي جداً
+        return 0.05
+
