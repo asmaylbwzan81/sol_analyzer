@@ -1,11 +1,13 @@
 
+
 import time
 import uuid
 import traceback
 from datetime import datetime
 
 from data_engine import get_klines, get_candles
-from voting_engine import vote, decision
+from voting_engine import vote, decision, _get_tier, STRONG_BASE
+from strategy_weights import get_all_weights
 from strategy_rsi import analyze as rsi_analyze
 from strategy_macd import analyze as macd_analyze
 from strategy_ema import analyze as ema_analyze
@@ -30,11 +32,30 @@ SYMBOLS = [
     "BNB", "ADA", "LINK", "AVAX"
 ]
 
-INTERVALS = ["1d", "4h", "1h"]
 SLEEP = 600
+MIN_RANK = 0.60 # الحد الأدنى للـ rank عشان تُبعث
 
 def generate_signal_id():
     return str(uuid.uuid4())[:8].upper()
+
+def calc_rank(final_score, combined):
+    """
+    rank = (score × 0.7) + (strong_agree_count / 5 × 0.3)
+    """
+    weights = get_all_weights()
+    strong_agree = sum(
+        1 for k, v in combined.items()
+        if _get_tier(k, weights.get(k, 1.0)) == "strong"
+        and (v >= 0.65 or v <= 0.35)
+    )
+    rank = (final_score * 0.7) + (strong_agree / 5 * 0.3)
+
+    # للـ SHORT نعكس الـ score عشان الحساب يكون صح
+    if final_score <= 0.40:
+        inverted = 1.0 - final_score
+        rank = (inverted * 0.7) + (strong_agree / 5 * 0.3)
+
+    return round(rank, 4), strong_agree
 
 def get_scores(symbol, interval):
     try:
@@ -47,7 +68,7 @@ def get_scores(symbol, interval):
             "bollinger": bollinger_analyze(prices),
             "volume": volume_analyze(candles),
             "momentum": momentum_analyze(prices),
-            "support_resistance": sr_analyze(prices), # ✅ اسم موحد
+            "support_resistance": sr_analyze(prices),
             "pattern": pattern_analyze(candles),
             "stochastic": stochastic_analyze(candles),
             "vwap": vwap_analyze(candles),
@@ -64,13 +85,14 @@ def get_scores(symbol, interval):
         return None, None, None
 
 def analyze_symbol(symbol):
+    """يحلل العملة ويرجع بيانات الإشارة أو None"""
     try:
         scores_1d, _, _ = get_scores(symbol, "1d")
         scores_4h, _, _ = get_scores(symbol, "4h")
         scores_1h, candles, price = get_scores(symbol, "1h")
 
         if not scores_1h or not scores_4h or not scores_1d:
-            return
+            return None
 
         combined = {}
         for key in scores_1h:
@@ -85,15 +107,12 @@ def analyze_symbol(symbol):
 
         sl_long, sl_short, tp_long, tp_short = get_levels(candles)
 
-        if str(direction) == "LONG":
-            sl = sl_long
-            tp = tp_long
-        elif str(direction) == "SHORT":
-            sl = sl_short
-            tp = tp_short
+        if direction == "LONG":
+            sl, tp = sl_long, tp_long
+        elif direction == "SHORT":
+            sl, tp = sl_short, tp_short
         else:
-            sl = None
-            tp = None
+            sl, tp = None, None
 
         verdict, ai_advice = review(combined, final_score, direction, price)
 
@@ -105,10 +124,19 @@ def analyze_symbol(symbol):
         print(f"💬 AI Advice: {ai_advice}")
 
         if action == "ENTER" and verdict == "APPROVE":
-            signal_id = generate_signal_id()
-            save_signal(signal_id, symbol, direction, final_score, price)
-            send_signal(signal_id, symbol, direction, final_score, price, ai_advice, combined, sl, tp)
-            print(f"✅ Signal Sent! ID: {signal_id}")
+            rank, strong_agree = calc_rank(final_score, combined)
+            print(f"🏆 Rank: {rank} | Strong Agree: {strong_agree}")
+            return {
+                "symbol": symbol,
+                "direction": direction,
+                "score": final_score,
+                "rank": rank,
+                "price": price,
+                "sl": sl,
+                "tp": tp,
+                "ai_advice": ai_advice,
+                "combined": combined,
+            }
         elif action == "ENTER" and verdict == "REJECT":
             print(f"🚫 AI رفض الإشارة! السبب: {ai_advice}")
         else:
@@ -117,6 +145,8 @@ def analyze_symbol(symbol):
     except Exception as e:
         print(f"❌ Error {symbol}: {e}")
         traceback.print_exc()
+
+    return None
 
 def main():
     print("🚀 Smart Analyzer Bot Started")
@@ -127,9 +157,46 @@ def main():
     while True:
         print(f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         check_result()
+
+        # ── جمع كل الإشارات ──
+        candidates = []
         for symbol in SYMBOLS:
-            analyze_symbol(symbol)
+            result = analyze_symbol(symbol)
+            if result:
+                candidates.append(result)
             time.sleep(2)
+
+        # ── اختيار الأقوى ──
+        if candidates:
+            # فلتر rank >= MIN_RANK
+            qualified = [c for c in candidates if c["rank"] >= MIN_RANK]
+
+            if qualified:
+                # الأقوى rank
+                best = max(qualified, key=lambda x: x["rank"])
+
+                signal_id = generate_signal_id()
+                save_signal(signal_id, best["symbol"], best["direction"], best["score"], best["price"])
+                send_signal(
+                    signal_id,
+                    best["symbol"],
+                    best["direction"],
+                    best["score"],
+                    best["price"],
+                    best["ai_advice"],
+                    best["combined"],
+                    best["sl"],
+                    best["tp"]
+                )
+                print(f"\n🏆 أفضل إشارة: {best['symbol']} {best['direction']} | Rank: {best['rank']}")
+                print(f"✅ Signal Sent! ID: {signal_id}")
+                print(f"📊 المرشحون: {len(candidates)} | المؤهلون: {len(qualified)}")
+            else:
+                print(f"\n⏭️ كل الإشارات تحت الحد الأدنى ({MIN_RANK}) — لا شيء يُبعث")
+                print(f"📊 المرشحون: {len(candidates)}")
+        else:
+            print("\n⏭️ لا توجد إشارات هذه الدورة")
+
         print("━" * 40)
         time.sleep(SLEEP)
 
