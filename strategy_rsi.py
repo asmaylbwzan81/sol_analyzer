@@ -1,4 +1,14 @@
-def analyze(prices, period=14):
+import json
+
+try:
+    with open("config.json") as f:
+        config = json.load(f)
+except:
+    config = {}
+
+def analyze(prices, period=None):
+    period = period or config.get("rsi_period", 14)
+
     if len(prices) < period + 1:
         return 0.5
 
@@ -16,22 +26,22 @@ def analyze(prices, period=14):
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
 
-    # ── قيم أكثر تفصيلاً ──
     if rsi < 20:
-        return 0.95 # oversold قوي جداً → LONG قوي
+        return 0.95
     elif rsi < 30:
-        return 0.85 # oversold قوي → LONG
+        return 0.85
     elif rsi < 40:
-        return 0.70 # oversold خفيف → LONG محتمل
+        return 0.70
     elif rsi < 45:
-        return 0.60 # تحت المحايد قليلاً
+        return 0.60
     elif rsi < 55:
-        return 0.50 # محايد
+        return 0.50
     elif rsi < 60:
-        return 0.40 # فوق المحايد قليلاً
+        return 0.40
     elif rsi < 70:
-        return 0.30 # overbought خفيف → SHORT محتمل
+        return 0.30
     elif rsi < 80:
-        return 0.15 # overbought قوي → SHORT
+        return 0.15
     else:
-        return 0.05 # overbought قوي جداً → SHORT قوي
+        return 0.05
+
