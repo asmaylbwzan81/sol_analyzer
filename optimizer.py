@@ -3,7 +3,7 @@ import json
 import time
 
 BINGX_BASE = "https://open-api.bingx.com"
-SYMBOLS = ["BTC", "DOGE", "SOL"]
+SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "ADA", "LINK", "AVAX"]
 INTERVAL = "4h"
 LIMIT = 1000
 FUTURE_CANDLES = 6
