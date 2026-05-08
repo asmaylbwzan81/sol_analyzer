@@ -1,92 +1,210 @@
-from strategy_weights import weighted_score, get_all_weights, init_db
+"""
+strategy_weights.py
+===================
+Strategy Dynamic Weighting System
+- كل استراتيجية تبدأ بوزن 1.0
+- تزيد عند WIN (+0.02) وتنقص عند LOSS (-0.03)
+- الحدود: min=0.2, max=2.0
+"""
 
-init_db()
+import sqlite3
+import os
+import logging
+from typing import Dict, List
 
-# ── تصنيف ابتدائي حسب Win Rate ──────────────
-STRONG_BASE = {"rsi", "bollinger", "stochastic", "fibonacci", "support_resistance"}
-MEDIUM_BASE = {"adx", "supertrend"}
-WEAK_BASE = {"momentum", "macd", "ema"}
+logger = logging.getLogger(__name__)
 
-# ── مضاعف الوزن حسب الطبقة ──────────────────
-TIER_MULTIPLIER = {
-    "strong": 1.5, # القوي صوته أثقل
-    "medium": 1.0, # المتوسط طبيعي
-    "weak": 0.4, # الضعيف صوته خفيف
+# ─────────────────────────────────────────────
+# الإعدادات
+# ─────────────────────────────────────────────
+DB_PATH = os.getenv("WEIGHTS_DB_PATH", "strategy_weights.db")
+
+DEFAULT_WEIGHT = 1.0
+WIN_DELTA = +0.02
+LOSS_DELTA = -0.03
+MIN_WEIGHT = 0.2
+MAX_WEIGHT = 2.0
+
+ALL_STRATEGIES: List[str] = [
+    "rsi", "macd", "ema", "bollinger", "volume",
+    "momentum", "support_resistance", "pattern",
+    "stochastic", "vwap", "adx", "fibonacci",
+    "news", "memory", "supertrend",
+]
+
+# ── الأوزان الابتدائية حسب الطبقة ──────────
+INITIAL_WEIGHTS: Dict[str, float] = {
+    # 💪 قوي
+    "rsi": 1.5,
+    "bollinger": 1.5,
+    "stochastic": 1.5,
+    "fibonacci": 1.5,
+    "support_resistance": 1.5,
+    # 😐 متوسط
+    "adx": 1.0,
+    "supertrend": 1.0,
+    "vwap": 1.0,
+    "volume": 1.0,
+    "pattern": 1.0,
+    "news": 1.0,
+    "memory": 1.0,
+    # 😴 ضعيف
+    "momentum": 0.5,
+    "macd": 0.5,
+    "ema": 0.5,
 }
 
-def _get_tier(name: str, weight: float) -> str:
-    """الطبقة تتغير حسب الوزن الحالي — عقاب وترقية ديناميكي"""
-    if name in STRONG_BASE:
-        if weight >= 0.9: return "strong"
-        elif weight >= 0.6: return "medium"
-        else: return "weak"
-    elif name in MEDIUM_BASE:
-        if weight >= 1.2: return "strong"
-        elif weight >= 0.6: return "medium"
-        else: return "weak"
-    else: # WEAK_BASE
-        if weight >= 1.5: return "strong"
-        elif weight >= 1.0: return "medium"
-        else: return "weak"
 
-def vote(scores: dict) -> float:
+# ─────────────────────────────────────────────
+# إدارة قاعدة البيانات
+# ─────────────────────────────────────────────
+def _get_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db() -> None:
+    with _get_conn() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS strategy_weights (
+                strategy_name TEXT PRIMARY KEY,
+                weight FLOAT NOT NULL DEFAULT 1.0,
+                wins INTEGER NOT NULL DEFAULT 0,
+                losses INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        conn.commit()
+        for name in ALL_STRATEGIES:
+            w = INITIAL_WEIGHTS.get(name, DEFAULT_WEIGHT)
+            conn.execute("""
+                INSERT OR IGNORE INTO strategy_weights
+                    (strategy_name, weight, wins, losses)
+                VALUES (?, ?, 0, 0)
+            """, (name, w))
+        conn.commit()
+    logger.info("✅ strategy_weights DB initialized (%s)", DB_PATH)
+
+
+# ─────────────────────────────────────────────
+# القراءة
+# ─────────────────────────────────────────────
+def get_weight(strategy_name: str) -> float:
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT weight FROM strategy_weights WHERE strategy_name = ?",
+            (strategy_name,)
+        ).fetchone()
+    return float(row["weight"]) if row else DEFAULT_WEIGHT
+
+
+def get_all_weights() -> Dict[str, float]:
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT strategy_name, weight FROM strategy_weights"
+        ).fetchall()
+    return {r["strategy_name"]: float(r["weight"]) for r in rows}
+
+
+def get_stats() -> List[Dict]:
+    with _get_conn() as conn:
+        rows = conn.execute("""
+            SELECT strategy_name, weight, wins, losses,
+                   CASE WHEN (wins + losses) > 0
+                        THEN ROUND(100.0 * wins / (wins + losses), 1)
+                        ELSE NULL
+                   END AS win_rate
+            FROM strategy_weights
+            ORDER BY weight DESC
+        """).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ─────────────────────────────────────────────
+# التحديث
+# ─────────────────────────────────────────────
+def _clamp(value: float) -> float:
+    return max(MIN_WEIGHT, min(value, MAX_WEIGHT))
+
+
+def update_weights(strategies_used: List[str], result: str) -> Dict[str, float]:
+    result = result.upper().strip()
+    if result not in ("WIN", "LOSS"):
+        logger.warning("⚠️ نتيجة غير معروفة: %s", result)
+        return {}
+
+    delta = WIN_DELTA if result == "WIN" else LOSS_DELTA
+    win_inc = 1 if result == "WIN" else 0
+    loss_inc = 0 if result == "WIN" else 1
+    updated = {}
+
+    with _get_conn() as conn:
+        for name in strategies_used:
+            name = name.lower().strip()
+            conn.execute("""
+                INSERT OR IGNORE INTO strategy_weights
+                    (strategy_name, weight, wins, losses)
+                VALUES (?, ?, 0, 0)
+            """, (name, DEFAULT_WEIGHT))
+
+            row = conn.execute(
+                "SELECT weight, wins, losses FROM strategy_weights WHERE strategy_name = ?",
+                (name,)
+            ).fetchone()
+
+            old_w = float(row["weight"])
+            new_w = _clamp(old_w + delta)
+            new_wins = row["wins"] + win_inc
+            new_losses = row["losses"] + loss_inc
+
+            conn.execute("""
+                UPDATE strategy_weights
+                SET weight = ?, wins = ?, losses = ?
+                WHERE strategy_name = ?
+            """, (new_w, new_wins, new_losses, name))
+
+            updated[name] = new_w
+            logger.info("📊 %s | %s | %.2f → %.2f | W:%d L:%d",
+                        name, result, old_w, new_w, new_wins, new_losses)
+        conn.commit()
+
+    return updated
+
+
+# ─────────────────────────────────────────────
+# التصويت المرجّح
+# ─────────────────────────────────────────────
+def weighted_score(signals: Dict[str, float]) -> float:
     """
-    Weighted score مع مضاعف الطبقة:
-    القوي وزنه × 1.5 | المتوسط × 1.0 | الضعيف × 0.4
+    احسب الـ score النهائي باستخدام الأوزان الديناميكية.
+    signal_value بين 0.0 (نزول قوي) و 1.0 (صعود قوي).
     """
-    if not scores:
+    if not signals:
         return 0.5
 
     weights = get_all_weights()
     total_weighted = 0.0
     total_weight = 0.0
 
-    for name, signal in scores.items():
-        base_w = weights.get(name.lower(), 1.0)
-        tier = _get_tier(name.lower(), base_w)
-        final_w = base_w * TIER_MULTIPLIER[tier]
-
-        total_weighted += signal * final_w
-        total_weight += final_w
+    for strategy, signal in signals.items():
+        w = weights.get(strategy.lower(), DEFAULT_WEIGHT)
+        total_weighted += signal * w
+        total_weight += w
 
     if total_weight == 0:
         return 0.5
+
     return round(total_weighted / total_weight, 4)
 
-def decision(score: float, scores: dict = None):
-    if scores:
-        weights = get_all_weights()
 
-        # ── عدّ الموافقين من كل طبقة ──
-        strong_agree = sum(
-            1 for k, v in scores.items()
-            if _get_tier(k, weights.get(k, 1.0)) == "strong"
-            and (v >= 0.65 or v <= 0.35)
-        )
-        medium_agree = sum(
-            1 for k, v in scores.items()
-            if _get_tier(k, weights.get(k, 1.0)) == "medium"
-            and (v >= 0.65 or v <= 0.35)
-        )
-
-        # ── شرط الدخول: 2 قوي + 2 متوسط ──
-        if strong_agree < 2 or medium_agree < 2:
-            return "SKIP", "NEUTRAL"
-
-        # ── تحديد الاتجاه ──
-        bullish = len([v for v in scores.values() if v >= 0.65])
-        bearish = len([v for v in scores.values() if v <= 0.35])
-        total = len(scores)
-
-        if score >= 0.60 and bullish > total * 0.5:
-            return "ENTER", "LONG"
-        elif score <= 0.40 and bearish > total * 0.5:
-            return "ENTER", "SHORT"
-        return "SKIP", "NEUTRAL"
-
-    # ── fallback بدون scores ──
-    if score >= 0.60:
-        return "ENTER", "LONG"
-    elif score <= 0.40:
-        return "ENTER", "SHORT"
-    return "SKIP", "NEUTRAL"
+# ─────────────────────────────────────────────
+# Reset
+# ─────────────────────────────────────────────
+def reset_all_weights() -> None:
+    with _get_conn() as conn:
+        conn.execute("""
+            UPDATE strategy_weights
+            SET weight = ?, wins = 0, losses = 0
+        """, (DEFAULT_WEIGHT,))
+        conn.commit()
+    logger.info("🔄 تم إعادة تعيين كل الأوزان إلى %.1f", DEFAULT_WEIGHT)
