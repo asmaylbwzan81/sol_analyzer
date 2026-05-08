@@ -62,16 +62,13 @@ def decision(score: float, scores: dict = None):
             and (v >= 0.65 or v <= 0.35)
         )
 
+        # ── شرط الدخول: 2 قوي + 2 متوسط فقط ──
         if strong_agree < 2 or medium_agree < 2:
             return "SKIP", "NEUTRAL"
 
-        bullish = len([v for v in scores.values() if v >= 0.65])
-        bearish = len([v for v in scores.values() if v <= 0.35])
-        total = len(scores)
-
-        if score >= 0.60 and bullish > total * 0.5:
+        if score >= 0.60:
             return "ENTER", "LONG"
-        elif score <= 0.40 and bearish > total * 0.5:
+        elif score <= 0.40:
             return "ENTER", "SHORT"
         return "SKIP", "NEUTRAL"
 
