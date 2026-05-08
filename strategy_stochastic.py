@@ -1,4 +1,14 @@
-def analyze(candles, period=14):
+import json
+
+try:
+    with open("config.json") as f:
+        config = json.load(f)
+except:
+    config = {}
+
+def analyze(candles, period=None):
+    period = period or config.get("stochastic_period", 14)
+
     if len(candles) < period:
         return 0.5
 
@@ -13,23 +23,23 @@ def analyze(candles, period=14):
     k = ((close - lowest) / (highest - lowest)) * 100
 
     if k < 10:
-        return 0.95 # oversold قوي جداً → LONG قوي جداً
+        return 0.95
     elif k < 20:
-        return 0.85 # oversold قوي → LONG قوي
+        return 0.85
     elif k < 30:
-        return 0.75 # oversold خفيف → LONG محتمل
+        return 0.75
     elif k < 40:
-        return 0.65 # تحت المنتصف
+        return 0.65
     elif k < 50:
-        return 0.55 # قريب من المنتصف تحت
+        return 0.55
     elif k < 60:
-        return 0.45 # قريب من المنتصف فوق
+        return 0.45
     elif k < 70:
-        return 0.35 # فوق المنتصف
+        return 0.35
     elif k < 80:
-        return 0.25 # overbought خفيف → SHORT محتمل
+        return 0.25
     elif k < 90:
-        return 0.15 # overbought قوي → SHORT قوي
+        return 0.15
     else:
-        return 0.05 # overbought قوي جداً → SHORT قوي جداً
+        return 0.05
 
