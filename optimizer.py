@@ -1,25 +1,14 @@
-optimizer.py
-============
-يجرب كل الإعدادات لكل مؤشر
-ويحفظ أفضل إعدادات في config.json
-يشتغل مرة وحدة فقط
-"""
-
 import requests
 import json
 import time
-import itertools
 
 BINGX_BASE = "https://open-api.bingx.com"
 SYMBOLS = ["BTC", "DOGE", "SOL"]
 INTERVAL = "4h"
-LIMIT = 1000 # ~6 أشهر
-FUTURE_CANDLES = 6 # 24 ساعة للأمام
+LIMIT = 1000
+FUTURE_CANDLES = 6
 CONFIG_FILE = "config.json"
 
-# ─────────────────────────────────────────────
-# جلب البيانات
-# ─────────────────────────────────────────────
 def get_historical(symbol, interval="4h", limit=1000):
     try:
         full_symbol = f"{symbol}-USDT"
@@ -38,9 +27,6 @@ def get_historical(symbol, interval="4h", limit=1000):
         print(f"❌ خطأ جلب {symbol}: {e}")
         return []
 
-# ─────────────────────────────────────────────
-# تحديد النتيجة
-# ─────────────────────────────────────────────
 def get_result(candles, index, direction, future=6):
     try:
         entry = candles[index]["close"]
@@ -53,10 +39,7 @@ def get_result(candles, index, direction, future=6):
     except:
         return None
 
-# ─────────────────────────────────────────────
-# تقييم مؤشر بإعداد معين
-# ─────────────────────────────────────────────
-def evaluate(candles, analyze_func, **kwargs):
+def evaluate(candles, analyze_func, use_prices=True):
     wins = 0
     losses = 0
     prices = [c["close"] for c in candles]
@@ -66,8 +49,7 @@ def evaluate(candles, analyze_func, **kwargs):
         window_prices = prices[:i+1]
 
         try:
-            # نمرر الأسعار أو الشمعات حسب المؤشر
-            score = analyze_func(window_prices, **kwargs) if kwargs.get("use_prices", True) else analyze_func(window_candles, **kwargs)
+            score = analyze_func(window_prices) if use_prices else analyze_func(window_candles)
         except:
             continue
 
@@ -89,9 +71,6 @@ def evaluate(candles, analyze_func, **kwargs):
         return 0.0
     return round(wins / total * 100, 1)
 
-# ─────────────────────────────────────────────
-# Optimizer لكل مؤشر
-# ─────────────────────────────────────────────
 def optimize_rsi(all_candles):
     print("\n📊 RSI — يجرب الإعدادات...")
     from strategy_rsi import analyze
@@ -100,7 +79,6 @@ def optimize_rsi(all_candles):
     for period in range(5, 31):
         wrs = []
         for candles in all_candles:
-            prices = [c["close"] for c in candles]
             wr = evaluate(candles, lambda p, period=period: analyze(p, period=period), use_prices=True)
             wrs.append(wr)
         avg_wr = sum(wrs) / len(wrs)
@@ -108,7 +86,7 @@ def optimize_rsi(all_candles):
             best_wr = avg_wr
             best_period = period
 
-    print(f"✅ RSI | أفضل period={best_period} | Win Rate: {best_wr:.1f}%")
+    print(f"✅ RSI | period={best_period} | Win Rate: {best_wr:.1f}%")
     return {"rsi_period": best_period, "rsi_winrate": best_wr}
 
 
@@ -120,7 +98,6 @@ def optimize_bollinger(all_candles):
     for period in range(10, 31):
         wrs = []
         for candles in all_candles:
-            prices = [c["close"] for c in candles]
             wr = evaluate(candles, lambda p, period=period: analyze(p, period=period), use_prices=True)
             wrs.append(wr)
         avg_wr = sum(wrs) / len(wrs)
@@ -128,7 +105,7 @@ def optimize_bollinger(all_candles):
             best_wr = avg_wr
             best_period = period
 
-    print(f"✅ Bollinger | أفضل period={best_period} | Win Rate: {best_wr:.1f}%")
+    print(f"✅ Bollinger | period={best_period} | Win Rate: {best_wr:.1f}%")
     return {"bollinger_period": best_period, "bollinger_winrate": best_wr}
 
 
@@ -150,7 +127,7 @@ def optimize_adx(all_candles):
             best_wr = avg_wr
             best_period = period
 
-    print(f"✅ ADX | أفضل period={best_period} | Win Rate: {best_wr:.1f}%")
+    print(f"✅ ADX | period={best_period} | Win Rate: {best_wr:.1f}%")
     return {"adx_period": best_period, "adx_winrate": best_wr}
 
 
@@ -172,7 +149,7 @@ def optimize_stochastic(all_candles):
             best_wr = avg_wr
             best_period = period
 
-    print(f"✅ Stochastic | أفضل period={best_period} | Win Rate: {best_wr:.1f}%")
+    print(f"✅ Stochastic | period={best_period} | Win Rate: {best_wr:.1f}%")
     return {"stochastic_period": best_period, "stochastic_winrate": best_wr}
 
 
@@ -196,7 +173,7 @@ def optimize_supertrend(all_candles):
                 best_period = period
                 best_mult = mult
 
-    print(f"✅ Supertrend | أفضل period={best_period}, mult={best_mult} | Win Rate: {best_wr:.1f}%")
+    print(f"✅ Supertrend | period={best_period}, mult={best_mult} | Win Rate: {best_wr:.1f}%")
     return {"supertrend_period": best_period, "supertrend_mult": best_mult, "supertrend_winrate": best_wr}
 
 
@@ -208,7 +185,6 @@ def optimize_fibonacci(all_candles):
     for period in range(20, 101, 5):
         wrs = []
         for candles in all_candles:
-            prices = [c["close"] for c in candles]
             wr = evaluate(candles, lambda p, period=period: analyze(p, period=period), use_prices=True)
             wrs.append(wr)
         avg_wr = sum(wrs) / len(wrs)
@@ -216,7 +192,7 @@ def optimize_fibonacci(all_candles):
             best_wr = avg_wr
             best_period = period
 
-    print(f"✅ Fibonacci | أفضل period={best_period} | Win Rate: {best_wr:.1f}%")
+    print(f"✅ Fibonacci | period={best_period} | Win Rate: {best_wr:.1f}%")
     return {"fibonacci_period": best_period, "fibonacci_winrate": best_wr}
 
 
@@ -228,7 +204,6 @@ def optimize_momentum(all_candles):
     for period in range(5, 26):
         wrs = []
         for candles in all_candles:
-            prices = [c["close"] for c in candles]
             wr = evaluate(candles, lambda p, period=period: analyze(p, period=period), use_prices=True)
             wrs.append(wr)
         avg_wr = sum(wrs) / len(wrs)
@@ -236,7 +211,7 @@ def optimize_momentum(all_candles):
             best_wr = avg_wr
             best_period = period
 
-    print(f"✅ Momentum | أفضل period={best_period} | Win Rate: {best_wr:.1f}%")
+    print(f"✅ Momentum | period={best_period} | Win Rate: {best_wr:.1f}%")
     return {"momentum_period": best_period, "momentum_winrate": best_wr}
 
 
@@ -248,7 +223,6 @@ def optimize_sr(all_candles):
     for period in range(10, 51, 5):
         wrs = []
         for candles in all_candles:
-            prices = [c["close"] for c in candles]
             wr = evaluate(candles, lambda p, period=period: analyze(p, period=period), use_prices=True)
             wrs.append(wr)
         avg_wr = sum(wrs) / len(wrs)
@@ -256,13 +230,13 @@ def optimize_sr(all_candles):
             best_wr = avg_wr
             best_period = period
 
-    print(f"✅ Support/Resistance | أفضل period={best_period} | Win Rate: {best_wr:.1f}%")
+    print(f"✅ Support/Resistance | period={best_period} | Win Rate: {best_wr:.1f}%")
     return {"sr_period": best_period, "sr_winrate": best_wr}
 
 
 def optimize_macd(all_candles):
     print("\n📊 MACD — يجرب الإعدادات...")
-    from strategy_macd import analyze, ema
+    from strategy_macd import ema
     best_fast, best_slow, best_wr = 12, 26, 0
 
     for fast in range(5, 16):
@@ -270,7 +244,6 @@ def optimize_macd(all_candles):
             if fast >= slow: continue
             wrs = []
             for candles in all_candles:
-                prices = [c["close"] for c in candles]
                 try:
                     def macd_analyze(p, f=fast, s=slow):
                         if len(p) < s: return 0.5
@@ -299,13 +272,13 @@ def optimize_macd(all_candles):
                 best_fast = fast
                 best_slow = slow
 
-    print(f"✅ MACD | أفضل fast={best_fast}, slow={best_slow} | Win Rate: {best_wr:.1f}%")
+    print(f"✅ MACD | fast={best_fast}, slow={best_slow} | Win Rate: {best_wr:.1f}%")
     return {"macd_fast": best_fast, "macd_slow": best_slow, "macd_winrate": best_wr}
 
 
 def optimize_ema(all_candles):
     print("\n📊 EMA — يجرب الإعدادات...")
-    from strategy_ema import analyze, ema
+    from strategy_ema import ema
     best_short, best_long, best_wr = 20, 50, 0
 
     for short in range(10, 31):
@@ -313,7 +286,6 @@ def optimize_ema(all_candles):
             if short >= long: continue
             wrs = []
             for candles in all_candles:
-                prices = [c["close"] for c in candles]
                 try:
                     def ema_analyze(p, s=short, l=long):
                         if len(p) < l: return 0.5
@@ -350,18 +322,14 @@ def optimize_ema(all_candles):
                 best_short = short
                 best_long = long
 
-    print(f"✅ EMA | أفضل short={best_short}, long={best_long} | Win Rate: {best_wr:.1f}%")
+    print(f"✅ EMA | short={best_short}, long={best_long} | Win Rate: {best_wr:.1f}%")
     return {"ema_short": best_short, "ema_long": best_long, "ema_winrate": best_wr}
 
 
-# ─────────────────────────────────────────────
-# الـ Main
-# ─────────────────────────────────────────────
 def main():
     print("🚀 Optimizer بدأ...")
-    print("━" * 50)
+    print("=" * 50)
 
-    # جلب البيانات
     all_candles = []
     for symbol in SYMBOLS:
         print(f"📊 جلب بيانات {symbol}...")
@@ -375,7 +343,6 @@ def main():
         print("❌ ما في بيانات!")
         return
 
-    # تشغيل الـ Optimizer لكل مؤشر
     config = {}
     config.update(optimize_rsi(all_candles))
     config.update(optimize_bollinger(all_candles))
@@ -388,27 +355,23 @@ def main():
     config.update(optimize_macd(all_candles))
     config.update(optimize_ema(all_candles))
 
-    # حفظ النتائج
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=4)
 
-    print("\n" + "━" * 50)
-    print("🏆 أفضل إعدادات المؤشرات:")
-    print(f"{'المؤشر':<25} {'الإعداد':<30} {'Win Rate':>8}")
-    print("-" * 65)
-    print(f"{'RSI':<25} {'period=' + str(config['rsi_period']):<30} {config['rsi_winrate']:>7.1f}%")
-    print(f"{'Bollinger':<25} {'period=' + str(config['bollinger_period']):<30} {config['bollinger_winrate']:>7.1f}%")
-    print(f"{'ADX':<25} {'period=' + str(config['adx_period']):<30} {config['adx_winrate']:>7.1f}%")
-    print(f"{'Stochastic':<25} {'period=' + str(config['stochastic_period']):<30} {config['stochastic_winrate']:>7.1f}%")
-    print(f"{'Supertrend':<25} {'period=' + str(config['supertrend_period']) + ', mult=' + str(config['supertrend_mult']):<30} {config['supertrend_winrate']:>7.1f}%")
-    print(f"{'Fibonacci':<25} {'period=' + str(config['fibonacci_period']):<30} {config['fibonacci_winrate']:>7.1f}%")
-    print(f"{'Momentum':<25} {'period=' + str(config['momentum_period']):<30} {config['momentum_winrate']:>7.1f}%")
-    print(f"{'Support/Resistance':<25} {'period=' + str(config['sr_period']):<30} {config['sr_winrate']:>7.1f}%")
-    print(f"{'MACD':<25} {'fast=' + str(config['macd_fast']) + ', slow=' + str(config['macd_slow']):<30} {config['macd_winrate']:>7.1f}%")
-    print(f"{'EMA':<25} {'short=' + str(config['ema_short']) + ', long=' + str(config['ema_long']):<30} {config['ema_winrate']:>7.1f}%")
-
-    print(f"\n✅ تم حفظ الإعدادات في {CONFIG_FILE} 🧠")
-    print("✅ البوت جاهز بأفضل إعدادات!")
+    print("\n" + "=" * 50)
+    print("🏆 افضل اعدادات المؤشرات:")
+    print(f"RSI | period={config['rsi_period']} | Win Rate: {config['rsi_winrate']:.1f}%")
+    print(f"Bollinger | period={config['bollinger_period']} | Win Rate: {config['bollinger_winrate']:.1f}%")
+    print(f"ADX | period={config['adx_period']} | Win Rate: {config['adx_winrate']:.1f}%")
+    print(f"Stochastic | period={config['stochastic_period']} | Win Rate: {config['stochastic_winrate']:.1f}%")
+    print(f"Supertrend | period={config['supertrend_period']}, mult={config['supertrend_mult']} | Win Rate: {config['supertrend_winrate']:.1f}%")
+    print(f"Fibonacci | period={config['fibonacci_period']} | Win Rate: {config['fibonacci_winrate']:.1f}%")
+    print(f"Momentum | period={config['momentum_period']} | Win Rate: {config['momentum_winrate']:.1f}%")
+    print(f"SR | period={config['sr_period']} | Win Rate: {config['sr_winrate']:.1f}%")
+    print(f"MACD | fast={config['macd_fast']}, slow={config['macd_slow']} | Win Rate: {config['macd_winrate']:.1f}%")
+    print(f"EMA | short={config['ema_short']}, long={config['ema_long']} | Win Rate: {config['ema_winrate']:.1f}%")
+    print("\n✅ تم حفظ الاعدادات في config.json")
+    print("✅ البوت جاهز بافضل اعدادات!")
 
 if __name__ == "__main__":
     main()
