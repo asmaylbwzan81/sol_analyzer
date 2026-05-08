@@ -47,7 +47,7 @@ def get_scores(symbol, interval):
             "bollinger": bollinger_analyze(prices),
             "volume": volume_analyze(candles),
             "momentum": momentum_analyze(prices),
-            "sr": sr_analyze(prices),
+            "support_resistance": sr_analyze(prices), # ✅ اسم موحد
             "pattern": pattern_analyze(candles),
             "stochastic": stochastic_analyze(candles),
             "vwap": vwap_analyze(candles),
@@ -81,7 +81,7 @@ def analyze_symbol(symbol):
             )
 
         final_score = vote(combined)
-        action, direction = decision(final_score, combined) # ← التغيير هنا
+        action, direction = decision(final_score, combined)
 
         sl_long, sl_short, tp_long, tp_short = get_levels(candles)
 
@@ -126,9 +126,7 @@ def main():
 
     while True:
         print(f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
         check_result()
-
         for symbol in SYMBOLS:
             analyze_symbol(symbol)
             time.sleep(2)
@@ -137,4 +135,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
