@@ -1,4 +1,14 @@
-def analyze(prices, period=50):
+import json
+
+try:
+    with open("config.json") as f:
+        config = json.load(f)
+except:
+    config = {}
+
+def analyze(prices, period=None):
+    period = period or config.get("fibonacci_period", 50)
+
     if len(prices) < period:
         return 0.5
 
@@ -21,36 +31,34 @@ def analyze(prices, period=50):
 
     tolerance = diff * 0.02
 
-    # إذا السعر عند مستوى فيبوناتشي
     for name, level in levels.items():
         if abs(price - level) < tolerance:
             position = (price - low) / diff
             if name == "0.786":
-                return 0.90 if position < 0.5 else 0.10 # دعم/مقاومة قوي جداً
+                return 0.90 if position < 0.5 else 0.10
             elif name == "0.618":
-                return 0.80 if position < 0.5 else 0.20 # دعم/مقاومة قوي
+                return 0.80 if position < 0.5 else 0.20
             elif name == "0.500":
-                return 0.60 if position < 0.5 else 0.40 # منتصف
+                return 0.60 if position < 0.5 else 0.40
             elif name == "0.382":
-                return 0.70 if position < 0.5 else 0.30 # دعم/مقاومة متوسط
+                return 0.70 if position < 0.5 else 0.30
             elif name == "0.236":
-                return 0.65 if position < 0.5 else 0.35 # دعم/مقاومة خفيف
+                return 0.65 if position < 0.5 else 0.35
 
-    # السعر بين المستويات
     position = (price - low) / diff
 
     if position < 0.10:
-        return 0.95 # قريب جداً من القاع
+        return 0.95
     elif position < 0.25:
-        return 0.75 # في الربع السفلي
+        return 0.75
     elif position < 0.40:
-        return 0.62 # تحت المنتصف
+        return 0.62
     elif position < 0.60:
-        return 0.50 # في المنتصف
+        return 0.50
     elif position < 0.75:
-        return 0.38 # فوق المنتصف
+        return 0.38
     elif position < 0.90:
-        return 0.25 # في الربع العلوي
+        return 0.25
     else:
-        return 0.05 # قريب جداً من القمة
+        return 0.05
 
