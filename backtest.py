@@ -2,7 +2,7 @@
 backtest.py
 ===========
 يشغل النظام الطبقي الجديد على بيانات تاريخية
-ويحدث أوزان strategy_weights.py
+بـ 3 إطارات زمنية (1d + 4h + 1h) مثل main.py الحقيقي
 """
 
 import requests
@@ -13,18 +13,15 @@ from layer_decision import layer_decision
 BINGX_BASE = "https://open-api.bingx.com"
 
 SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "ADA", "LINK", "AVAX"]
-INTERVAL = "4h"
-LIMIT = 1000
 FUTURE_CANDLES = 6
 
 # ─────────────────────────────────────────────
 # جلب البيانات التاريخية
 # ─────────────────────────────────────────────
-def get_historical(symbol, interval="4h", limit=1000):
+def get_historical(symbol, interval="1h", limit=1000):
     try:
-        full_symbol = f"{symbol}-USDT"
         url = f"{BINGX_BASE}/openApi/swap/v2/quote/klines"
-        params = {"symbol": full_symbol, "interval": interval, "limit": limit}
+        params = {"symbol": f"{symbol}-USDT", "interval": interval, "limit": limit}
         data = requests.get(url, params=params, timeout=10).json()
         candles = data.get("data", [])
         return [{
@@ -35,13 +32,13 @@ def get_historical(symbol, interval="4h", limit=1000):
             "volume": float(c["volume"])
         } for c in candles]
     except Exception as e:
-        print(f"❌ خطأ جلب {symbol}: {e}")
+        print(f"❌ خطأ جلب {symbol} {interval}: {e}")
         return []
 
 # ─────────────────────────────────────────────
 # تشغيل الاستراتيجيات
 # ─────────────────────────────────────────────
-def run_strategies(candles, symbol="BTC"):
+def run_strategies(candles):
     try:
         from strategy_rsi import analyze as rsi
         from strategy_macd import analyze as macd
@@ -55,8 +52,6 @@ def run_strategies(candles, symbol="BTC"):
         from strategy_vwap import analyze as vwap
         from strategy_adx import analyze as adx
         from strategy_fibonacci import analyze as fib
-        from strategy_news import analyze as news
-        from strategy_memory import analyze as memory
         from strategy_supertrend import analyze as supertrend
 
         prices = [c["close"] for c in candles]
@@ -74,13 +69,26 @@ def run_strategies(candles, symbol="BTC"):
             "vwap": vwap(candles),
             "adx": adx(candles),
             "fibonacci": fib(prices),
-            "news": 0.5, # محايد في الـ backtest
-            "memory": 0.5, # محايد في الـ backtest
+            "news": 0.5,
+            "memory": 0.5,
             "supertrend": supertrend(candles),
         }
     except Exception as e:
         print(f"❌ خطأ الاستراتيجيات: {e}")
         return {}
+
+# ─────────────────────────────────────────────
+# دمج 3 إطارات (نفس main.py)
+# ─────────────────────────────────────────────
+def combine_timeframes(scores_1d, scores_4h, scores_1h):
+    combined = {}
+    for key in scores_1h:
+        combined[key] = (
+            scores_1d.get(key, 0.5) * 0.5 +
+            scores_4h.get(key, 0.5) * 0.3 +
+            scores_1h.get(key, 0.5) * 0.2
+        )
+    return combined
 
 # ─────────────────────────────────────────────
 # تحديد النتيجة
@@ -90,55 +98,62 @@ def get_result(candles, index, direction, future=6):
         entry = candles[index]["close"]
         future_index = min(index + future, len(candles) - 1)
         future_price = candles[future_index]["close"]
-
         if direction == "LONG":
             return "WIN" if future_price > entry else "LOSS"
         elif direction == "SHORT":
             return "WIN" if future_price < entry else "LOSS"
-        return None
     except:
-        return None
+        pass
+    return None
 
 # ─────────────────────────────────────────────
-# الـ Backtest الرئيسي
+# Backtest لكل عملة
 # ─────────────────────────────────────────────
 def backtest_symbol(symbol):
     print(f"\n{'═'*50}")
-    print(f"📊 {symbol} — جلب البيانات...")
-    candles = get_historical(symbol, INTERVAL, LIMIT)
+    print(f"📊 {symbol} — جلب البيانات (3 إطارات)...")
 
-    if len(candles) < 50:
-        print(f"⚠️ بيانات قليلة جداً لـ {symbol}")
+    candles_1h = get_historical(symbol, "1h", 1000)
+    candles_4h = get_historical(symbol, "4h", 500)
+    candles_1d = get_historical(symbol, "1d", 200)
+
+    if len(candles_1h) < 50:
+        print(f"⚠️ بيانات قليلة لـ {symbol}")
         return 0, 0
 
-    wins = 0
-    losses = 0
-    skips = 0
-
-    # إحصائيات الرفض لكل طبقة
+    wins = losses = skips = 0
     skip_reasons = {
-        "trend": 0,
-        "liquidity": 0,
-        "momentum": 0,
-        "structure": 0,
-        "volatility":0,
-        "confidence":0,
+        "trend": 0, "liquidity": 0, "momentum": 0,
+        "structure": 0, "volatility": 0, "confidence": 0,
     }
 
-    for i in range(50, len(candles) - FUTURE_CANDLES):
-        window = candles[:i+1]
-        scores = run_strategies(window, symbol)
-        if not scores:
+    for i in range(50, len(candles_1h) - FUTURE_CANDLES):
+        w_1h = candles_1h[:i+1]
+        i_4h = min(int(i / 4), len(candles_4h) - 1)
+        i_1d = min(int(i / 24), len(candles_1d) - 1)
+        w_4h = candles_4h[:i_4h+1]
+        w_1d = candles_1d[:i_1d+1]
+
+        if len(w_4h) < 50 or len(w_1d) < 50:
             continue
 
-        # ══ النظام الطبقي الجديد ══
-        result_data = layer_decision(scores)
+        scores_1h = run_strategies(w_1h)
+        scores_4h = run_strategies(w_4h)
+        scores_1d = run_strategies(w_1d)
+
+        if not scores_1h or not scores_4h or not scores_1d:
+            continue
+
+        # ══ دمج 3 إطارات مثل main.py ══
+        combined = combine_timeframes(scores_1d, scores_4h, scores_1h)
+
+        # ══ النظام الطبقي ══
+        result_data = layer_decision(combined)
         action = result_data["action"]
         direction = result_data["direction"]
 
         if action == "SKIP":
             skips += 1
-            # تسجيل سبب الرفض
             reason = result_data.get("reason", "")
             if "Trend" in reason: skip_reasons["trend"] += 1
             elif "Liquidity" in reason: skip_reasons["liquidity"] += 1
@@ -152,44 +167,37 @@ def backtest_symbol(symbol):
             skips += 1
             continue
 
-        # النتيجة
-        result = get_result(candles, i, direction, FUTURE_CANDLES)
+        result = get_result(candles_1h, i, direction, FUTURE_CANDLES)
         if not result:
             continue
 
-        # تحديث الأوزان
         if direction == "LONG":
-            strategies_used = [k for k, v in scores.items() if v >= 0.62]
+            strategies_used = [k for k, v in scores_1h.items() if v >= 0.62]
         else:
-            strategies_used = [k for k, v in scores.items() if v <= 0.38]
+            strategies_used = [k for k, v in scores_1h.items() if v <= 0.38]
 
         if strategies_used:
             update_weights(strategies_used, result)
 
-        if result == "WIN":
-            wins += 1
-        else:
-            losses += 1
+        if result == "WIN": wins += 1
+        else: losses += 1
 
-    total_trades = wins + losses
-    win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
-
-    print(f"✅ صفقات: {total_trades} | WIN: {wins} | LOSS: {losses} | Win Rate: {win_rate:.1f}%")
-    print(f"⏭️ تخطي: {skips} | أسباب: Trend={skip_reasons['trend']} Liq={skip_reasons['liquidity']} Mom={skip_reasons['momentum']} Str={skip_reasons['structure']} Vol={skip_reasons['volatility']} Conf={skip_reasons['confidence']}")
-
+    total = wins + losses
+    win_rate = (wins / total * 100) if total > 0 else 0
+    print(f"✅ صفقات: {total} | WIN: {wins} | LOSS: {losses} | Win Rate: {win_rate:.1f}%")
+    print(f"⏭️ تخطي: {skips} | Trend={skip_reasons['trend']} Liq={skip_reasons['liquidity']} Mom={skip_reasons['momentum']} Str={skip_reasons['structure']} Vol={skip_reasons['volatility']} Conf={skip_reasons['confidence']}")
     return wins, losses
 
 # ─────────────────────────────────────────────
-# تشغيل كل العملات
+# Main
 # ─────────────────────────────────────────────
 def main():
-    print("🚀 Backtest بدأ — النظام الطبقي الجديد")
+    print("🚀 Backtest سمارت — 3 إطارات زمنية")
     print("━" * 50)
 
     init_db()
 
-    total_wins = 0
-    total_losses = 0
+    total_wins = total_losses = 0
 
     for symbol in SYMBOLS:
         w, l = backtest_symbol(symbol)
@@ -204,24 +212,22 @@ def main():
         wr = total_wins / total * 100
         print(f"✅ WIN: {total_wins} | ❌ LOSS: {total_losses} | Win Rate: {wr:.1f}%")
         if wr >= 60:
-            print("🏆 ممتاز! النظام جاهز للتداول الحقيقي")
+            print("🏆 ممتاز! النظام جاهز")
         elif wr >= 50:
-            print("⚠️ معقول، يحتاج تحسين بسيط")
+            print("⚠️ معقول، يحتاج تحسين")
         else:
-            print("❌ النظام يحتاج مراجعة — Win Rate منخفض")
+            print("❌ يحتاج مراجعة")
 
-    print("\n🏆 أوزان الاستراتيجيات بعد التدريب:")
+    print("\n🏆 أوزان الاستراتيجيات:")
     print(f"{'Strategy':<25} {'Weight':>7} {'Wins':>5} {'Losses':>7} {'Win%':>6}")
     print("-" * 55)
     for s in get_stats():
         wr = f"{s['win_rate']}%" if s['win_rate'] is not None else "N/A"
         print(f"{s['strategy_name']:<25} {s['weight']:>7.2f} {s['wins']:>5} {s['losses']:>7} {wr:>6}")
 
-    print("\n✅ تم تحديث الأوزان! البوت جاهز بخبرة تاريخية 🧠")
-
-    # ── تحليل وتوصيات ──────────────────────────
+    # ── توصيات ──────────────────────────────
     print("\n" + "═" * 50)
-    print("💡 التوصيات بناءً على النتائج:")
+    print("💡 التوصيات:")
     print("─" * 50)
 
     stats = get_stats()
@@ -236,29 +242,27 @@ def main():
                 strong_strategies.append((s['strategy_name'], s['win_rate']))
 
     if weak_strategies:
-        print(f"\n🔴 مؤشرات ضعيفة (Win Rate < 45%) — فكر في تقليل وزنها:")
+        print(f"\n🔴 مؤشرات ضعيفة (< 45%):")
         for name, wr in weak_strategies:
             print(f" • {name}: {wr}%")
 
     if strong_strategies:
-        print(f"\n🟢 مؤشرات قوية (Win Rate >= 65%) — زد اعتمادك عليها:")
+        print(f"\n🟢 مؤشرات قوية (>= 65%):")
         for name, wr in strong_strategies:
             print(f" • {name}: {wr}%")
 
     print("\n📋 توصيات عامة:")
-    total = total_wins + total_losses
     if total > 0:
         wr = total_wins / total * 100
         if wr < 50:
-            print(" • رفع MIN_CONFIDENCE من 0.75 إلى 0.80")
-            print(" • تشديد شرط الهيكل — require 2/3 بدل 1/3")
-            print(" • مراجعة مؤشرات الاتجاه (EMA/ADX/Supertrend)")
+            print(" • رفع MIN_CONFIDENCE إلى 0.80")
+            print(" • تشديد شرط الهيكل 2/3")
+            print(" • مراجعة مؤشرات الاتجاه")
         elif wr < 60:
-            print(" • رفع MIN_CONFIDENCE من 0.75 إلى 0.78")
-            print(" • مراقبة المؤشرات الضعيفة أعلاه")
+            print(" • رفع MIN_CONFIDENCE إلى 0.78")
+            print(" • مراقبة المؤشرات الضعيفة")
         else:
-            print(" • النظام شغال جيد — راقب النتائج الحية أسبوع")
-            print(" • بعد 50 صفقة حية شغّل backtest مجدداً للتحديث")
+            print(" • النظام جيد — راقب أسبوع وأعد الفحص")
 
     print("═" * 50)
 
