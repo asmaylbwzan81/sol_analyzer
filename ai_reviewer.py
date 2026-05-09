@@ -4,16 +4,12 @@ import json
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
-# ── الحد الأدنى للثقة عشان Groq يشتغل ──────
 MIN_CONFIDENCE_FOR_REVIEW = 0.75
 
-def review(scores, final_score, direction, price):
+def review(scores, final_score, direction, price, scores_1d=None, scores_4h=None, scores_1h=None):
     """
-    يراجع قرار التداول ويرجع:
-    - verdict: "APPROVE" أو "REJECT"
-    - advice: نص قصير بالعربي
-
-    ⚡ يشتغل فقط إذا confidence >= 0.70 وaction=ENTER
+    Groq يحكم على الصفقة بعد ما سمارت يفلتر
+    يحلل 3 إطارات زمنية مثل البوت القديم
     """
 
     # ── فلتر 1: بس الصفقات القوية ──────────
@@ -28,46 +24,61 @@ def review(scores, final_score, direction, price):
     if not GROQ_API_KEY:
         return "APPROVE", "⚠️ No Groq API Key"
 
-    # ── طبقات المؤشرات حسب النظام الجديد ───
-    TREND_LAYER = {"ema", "supertrend", "adx"}
-    MOMENTUM_LAYER = {"rsi", "macd", "stochastic", "momentum"}
-    LIQUIDITY_LAYER = {"volume", "vwap"}
-    STRUCTURE_LAYER = {"fibonacci", "support_resistance", "pattern"}
+    # ── إذا ما في 3 إطارات، استخدم combined ──
+    if not scores_1d or not scores_4h or not scores_1h:
+        ind_1h = ind_4h = ind_1d = {k: round(v, 2) for k, v in scores.items()}
+    else:
+        ind_1h = {k: round(v, 2) for k, v in scores_1h.items()}
+        ind_4h = {k: round(v, 2) for k, v in scores_4h.items()}
+        ind_1d = {k: round(v, 2) for k, v in scores_1d.items()}
 
-    trend_scores = {k: round(v,2) for k, v in scores.items() if k in TREND_LAYER}
-    momentum_scores = {k: round(v,2) for k, v in scores.items() if k in MOMENTUM_LAYER}
-    liquidity_scores= {k: round(v,2) for k, v in scores.items() if k in LIQUIDITY_LAYER}
-    structure_scores= {k: round(v,2) for k, v in scores.items() if k in STRUCTURE_LAYER}
+    def extract(ind):
+        return {
+            "rsi": ind.get("rsi", 0.5),
+            "adx": ind.get("adx", 0.5),
+            "ema": ind.get("ema", 0.5),
+            "macd": ind.get("macd", 0.5),
+            "volume": ind.get("volume", 0.5),
+        }
 
-    prompt = f"""
-أنت مراجع تداول ذكي ومتحفظ. مهمتك مراجعة صفقة قريبة من الدخول.
+    tf_1h = extract(ind_1h)
+    tf_4h = extract(ind_4h)
+    tf_1d = extract(ind_1d)
 
-البيانات:
-- السعر: {price}
-- الاتجاه: {direction}
-- الثقة: {round(final_score, 2)} (من 1.0)
+    prompt = f"""أنت محلل تداول خبير ومتحفظ. مهمتك مراجعة صفقة اجتازت فلاتر صارمة.
 
-🟢 مؤشرات الاتجاه (الأهم):
-{json.dumps(trend_scores, indent=2)}
+السعر: {price}
+الاتجاه: {direction}
+ثقة النظام: {round(final_score * 100)}%
 
-🟡 مؤشرات الزخم:
-{json.dumps(momentum_scores, indent=2)}
+📊 مؤشرات الساعة (1H):
+- RSI: {tf_1h['rsi']} | ADX: {tf_1h['adx']}
+- EMA: {tf_1h['ema']} | MACD: {tf_1h['macd']}
+- Volume: {tf_1h['volume']}
 
-🔵 مؤشرات السيولة:
-{json.dumps(liquidity_scores, indent=2)}
+📊 مؤشرات 4 ساعات (4H):
+- RSI: {tf_4h['rsi']} | ADX: {tf_4h['adx']}
+- EMA: {tf_4h['ema']} | MACD: {tf_4h['macd']}
 
-🟣 مؤشرات الهيكل:
-{json.dumps(structure_scores, indent=2)}
+📊 مؤشرات يومي (1D):
+- RSI: {tf_1d['rsi']} | ADX: {tf_1d['adx']}
+- EMA: {tf_1d['ema']} | MACD: {tf_1d['macd']}
 
-أجب بهذا الشكل بالضبط (3 أسطر فقط):
+قواعد (القيم بين 0-1):
+- RSI < 0.35 = تشبع بيع → LONG | RSI > 0.65 = تشبع شراء → SHORT
+- EMA > 0.5 = صاعد | EMA < 0.5 = هابط
+- ADX > 0.6 = ترند قوي | ADX < 0.4 = ضعيف
+- MACD > 0.5 = زخم صاعد | MACD < 0.5 = هابط
+
+أجب بهذا الشكل بالضبط (3 أسطر):
 VERDICT: APPROVE أو REJECT
-REASON: سبب قصير جداً
-ADVICE: نصيحة واحدة قصيرة
+REASON: سبب قصير
+ADVICE: نصيحة واحدة
 
-قواعد:
-- APPROVE: مؤشرات الاتجاه متوافقة والزخم يدعم
-- REJECT: تضارب في مؤشرات الاتجاه أو سيولة ضعيفة جداً أو خطر عالي
-- كن متحفظاً — الهدف حماية الرصيد
+قواعد القرار:
+- APPROVE: 3 إطارات متوافقة والاتجاه واضح
+- REJECT: تضارب بين الإطارات أو ADX ضعيف أو خطر عالي
+- كن صارماً — حماية الرصيد أولاً
 """
 
     try:
@@ -90,7 +101,6 @@ ADVICE: نصيحة واحدة قصيرة
             return "APPROVE", f"⚠️ Groq: {data.get('error', {}).get('message', 'خطأ غير معروف')}"
 
         text = data["choices"][0]["message"]["content"].strip()
-
         verdict = "APPROVE"
         advice = text
 
