@@ -32,7 +32,7 @@ SYMBOLS = [
 ]
 
 SLEEP = 600
-MIN_RANK = 0.60
+MIN_RANK = 0.75
 
 def quick_rsi(prices, period=14):
     if len(prices) < period + 1:
