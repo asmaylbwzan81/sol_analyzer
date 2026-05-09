@@ -1,4 +1,3 @@
-
 import time
 import uuid
 import traceback
@@ -6,7 +5,7 @@ from datetime import datetime
 
 from data_engine import get_klines, get_candles
 from layer_decision import layer_decision, print_debug
-from strategy_weights import get_all_weights
+from strategy_weights import get_all_weights, init_db
 from strategy_rsi import analyze as rsi_analyze
 from strategy_macd import analyze as macd_analyze
 from strategy_ema import analyze as ema_analyze
@@ -28,10 +27,12 @@ from notifier import send_signal, check_result, send_startup
 
 SYMBOLS = [
     "BTC", "ETH", "SOL", "XRP", "DOGE",
-    "BNB", "ADA", "LINK", "AVAX"
+    "BNB", "ADA", "LINK", "AVAX",
+    "LTC", "DOT", "ATOM", "NEAR", "ARB",
+    "OP", "INJ", "SUI", "TIA"
 ]
 
-SLEEP = 600
+SLEEP = 1200 # 20 دقيقة
 MIN_RANK = 0.75
 
 def quick_rsi(prices, period=14):
@@ -182,6 +183,7 @@ def main():
     print("🚀 Smart Analyzer Bot Started")
     print(f"📊 Symbols: {len(SYMBOLS)}")
     print("━" * 40)
+    init_db()
     send_startup()
 
     while True:
