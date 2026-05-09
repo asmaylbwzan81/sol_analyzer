@@ -1,30 +1,16 @@
 import requests
 import os
-import json
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 MIN_CONFIDENCE_FOR_REVIEW = 0.75
 
-def review(scores, final_score, direction, price, scores_1d=None, scores_4h=None, scores_1h=None):
-    """
-    Groq يحكم على الصفقة بعد ما سمارت يفلتر
-    يحلل 3 إطارات زمنية مثل البوت القديم
-    """
 
-    # ── فلتر 1: بس الصفقات القوية ──────────
-    if final_score < MIN_CONFIDENCE_FOR_REVIEW:
-        print(f"⏭️ Groq تخطى — confidence={round(final_score,2)} أقل من {MIN_CONFIDENCE_FOR_REVIEW}")
-        return "APPROVE", f"⏭️ ثقة منخفضة ({round(final_score,2)}) — تم القبول التلقائي"
-
-    # ── فلتر 2: بس LONG أو SHORT ────────────
-    if direction not in ("LONG", "SHORT"):
-        return "REJECT", "⏭️ اتجاه غير واضح"
-
-    if not GROQ_API_KEY:
-        return "APPROVE", "⚠️ No Groq API Key"
-
-    # ── إذا ما في 3 إطارات، استخدم combined ──
+# ══════════════════════════════════════════════════════════════
+# 🧠 الدالة المشتركة: تجهيز البيانات
+# ══════════════════════════════════════════════════════════════
+def _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h):
     if not scores_1d or not scores_4h or not scores_1h:
         ind_1h = ind_4h = ind_1d = {k: round(v, 2) for k, v in scores.items()}
     else:
@@ -41,12 +27,16 @@ def review(scores, final_score, direction, price, scores_1d=None, scores_4h=None
             "volume": ind.get("volume", 0.5),
         }
 
-    tf_1h = extract(ind_1h)
-    tf_4h = extract(ind_4h)
-    tf_1d = extract(ind_1d)
+    return extract(ind_1h), extract(ind_4h), extract(ind_1d)
 
-    prompt = f"""أنت محلل تداول خبير ومتحفظ. مهمتك مراجعة صفقة اجتازت فلاتر صارمة.
 
+# ══════════════════════════════════════════════════════════════
+# 📝 بناء الـ Prompt (مشترك بين الاثنين)
+# ══════════════════════════════════════════════════════════════
+def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, second_layer=False):
+    note = "(هذه المراجعة الثانية — Groq وافق بالفعل، أنت الحكم الأخير)\n" if second_layer else ""
+    return f"""أنت محلل تداول خبير ومتحفظ. مهمتك مراجعة صفقة اجتازت فلاتر صارمة.
+{note}
 السعر: {price}
 الاتجاه: {direction}
 ثقة النظام: {round(final_score * 100)}%
@@ -81,6 +71,32 @@ ADVICE: نصيحة واحدة
 - كن صارماً — حماية الرصيد أولاً
 """
 
+
+# ══════════════════════════════════════════════════════════════
+# 🔍 تحليل الرد (مشترك)
+# ══════════════════════════════════════════════════════════════
+def _parse_response(text):
+    verdict = "APPROVE"
+    advice = text
+    for line in text.split("\n"):
+        line = line.strip()
+        if line.startswith("VERDICT:"):
+            v = line.replace("VERDICT:", "").strip().upper()
+            verdict = "REJECT" if "REJECT" in v else "APPROVE"
+        elif line.startswith("ADVICE:"):
+            advice = line.replace("ADVICE:", "").strip()
+    return verdict, advice
+
+
+# ══════════════════════════════════════════════════════════════
+# 🤖 الذكاء الأول: Groq (8B — سريع)
+# ══════════════════════════════════════════════════════════════
+def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d):
+    if not GROQ_API_KEY:
+        return "APPROVE", "⚠️ No Groq API Key — تم القبول التلقائي"
+
+    prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, second_layer=False)
+
     try:
         res = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -96,25 +112,90 @@ ADVICE: نصيحة واحدة
             timeout=10
         )
         data = res.json()
-
         if "choices" not in data:
             return "APPROVE", f"⚠️ Groq: {data.get('error', {}).get('message', 'خطأ غير معروف')}"
 
         text = data["choices"][0]["message"]["content"].strip()
-        verdict = "APPROVE"
-        advice = text
-
-        for line in text.split("\n"):
-            line = line.strip()
-            if line.startswith("VERDICT:"):
-                v = line.replace("VERDICT:", "").strip().upper()
-                verdict = "REJECT" if "REJECT" in v else "APPROVE"
-            elif line.startswith("ADVICE:"):
-                advice = line.replace("ADVICE:", "").strip()
-
+        verdict, advice = _parse_response(text)
         print(f"🤖 Groq → {verdict} | {advice}")
         return verdict, advice
 
     except Exception as e:
         return "APPROVE", f"⚠️ Groq Error: {e}"
+
+
+# ══════════════════════════════════════════════════════════════
+# 🦙 الذكاء الثاني: OpenRouter (70B — أقوى)
+# ══════════════════════════════════════════════════════════════
+def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d):
+    if not OPENROUTER_API_KEY:
+        return "APPROVE", "⚠️ No OpenRouter API Key — تم القبول التلقائي"
+
+    prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, second_layer=True)
+
+    try:
+        res = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/smart_analyzer",
+            },
+            json={
+                "model": "meta-llama/llama-3.1-70b-instruct:free",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 150
+            },
+            timeout=15
+        )
+        data = res.json()
+        if "choices" not in data:
+            print(f"⚠️ OpenRouter Error: {data}")
+            return "APPROVE", "⚠️ OpenRouter خطأ — تم القبول التلقائي"
+
+        text = data["choices"][0]["message"]["content"].strip()
+        verdict, advice = _parse_response(text)
+        print(f"🦙 OpenRouter → {verdict} | {advice}")
+        return verdict, advice
+
+    except Exception as e:
+        return "APPROVE", f"⚠️ OpenRouter Error: {e}"
+
+
+# ══════════════════════════════════════════════════════════════
+# 🚀 الدالة الرئيسية — نفس الاسم القديم (ما تكسر main.py)
+# ══════════════════════════════════════════════════════════════
+def review(scores, final_score, direction, price,
+           scores_1d=None, scores_4h=None, scores_1h=None):
+    """
+    طبقة مزدوجة: Groq أولاً ثم OpenRouter
+    كلاهم لازم يوافقون — وإلا REJECT
+    """
+
+    # ── فلتر 1: بس الصفقات القوية ──────────
+    if final_score < MIN_CONFIDENCE_FOR_REVIEW:
+        print(f"⏭️ AI Review تخطى — confidence={round(final_score,2)} أقل من {MIN_CONFIDENCE_FOR_REVIEW}")
+        return "APPROVE", f"⏭️ ثقة منخفضة ({round(final_score,2)}) — تم القبول التلقائي"
+
+    # ── فلتر 2: بس LONG أو SHORT ────────────
+    if direction not in ("LONG", "SHORT"):
+        return "REJECT", "⏭️ اتجاه غير واضح"
+
+    # ── تجهيز البيانات ──────────────────────
+    tf_1h, tf_4h, tf_1d = _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h)
+
+    # ── الذكاء الأول: Groq ───────────────────
+    groq_verdict, groq_advice = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d)
+
+    if groq_verdict == "REJECT":
+        return "REJECT", f"🤖 Groq رفض: {groq_advice}"
+
+    # ── الذكاء الثاني: OpenRouter (بس لو Groq وافق) ──
+    or_verdict, or_advice = _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d)
+
+    if or_verdict == "REJECT":
+        return "REJECT", f"🦙 OpenRouter رفض: {or_advice}"
+
+    # ── كلاهم وافق ✅ ────────────────────────
+    return "APPROVE", f"✅ Groq + OpenRouter وافقا | {or_advice}"
 
