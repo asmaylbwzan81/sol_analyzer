@@ -4,10 +4,8 @@ import json
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
-# ── تصنيف الموشرات ──────────────────────────
-STRONG_BASE = {"rsi", "bollinger", "stochastic", "fibonacci", "support_resistance"}
-MEDIUM_BASE = {"adx", "supertrend"}
-WEAK_BASE = {"momentum", "macd", "ema"}
+# ── الحد الأدنى للثقة عشان Groq يشتغل ──────
+MIN_CONFIDENCE_FOR_REVIEW = 0.70
 
 def review(scores, final_score, direction, price):
     """
@@ -15,51 +13,61 @@ def review(scores, final_score, direction, price):
     - verdict: "APPROVE" أو "REJECT"
     - advice: نص قصير بالعربي
 
-    ⚡ لا يحلل إذا السكور بين 0.40 و 0.60 — توفير رصيد Groq
+    ⚡ يشتغل فقط إذا confidence >= 0.70 وaction=ENTER
     """
-    # ── فلتر السكور: بس الصفقات الجدية ──────
-    if 0.40 < final_score < 0.60:
-        return "REJECT", "⏭️ السكور في المنطقة الرمادية، تم التخطي"
+
+    # ── فلتر 1: بس الصفقات القوية ──────────
+    if final_score < MIN_CONFIDENCE_FOR_REVIEW:
+        print(f"⏭️ Groq تخطى — confidence={round(final_score,2)} أقل من {MIN_CONFIDENCE_FOR_REVIEW}")
+        return "APPROVE", f"⏭️ ثقة منخفضة ({round(final_score,2)}) — تم القبول التلقائي"
+
+    # ── فلتر 2: بس LONG أو SHORT ────────────
+    if direction not in ("LONG", "SHORT"):
+        return "REJECT", "⏭️ اتجاه غير واضح"
 
     if not GROQ_API_KEY:
         return "APPROVE", "⚠️ No Groq API Key"
 
-    # ── تصنيف الموشرات للبرومبت ─────────────
-    strong_scores = {k: v for k, v in scores.items() if k in STRONG_BASE}
-    medium_scores = {k: v for k, v in scores.items() if k in MEDIUM_BASE}
-    weak_scores = {k: v for k, v in scores.items() if k in WEAK_BASE}
+    # ── طبقات المؤشرات حسب النظام الجديد ───
+    TREND_LAYER = {"ema", "supertrend", "adx"}
+    MOMENTUM_LAYER = {"rsi", "macd", "stochastic", "momentum"}
+    LIQUIDITY_LAYER = {"volume", "vwap"}
+    STRUCTURE_LAYER = {"fibonacci", "support_resistance", "pattern"}
 
-    strongest = max(scores, key=scores.get)
-    weakest = min(scores, key=scores.get)
+    trend_scores = {k: round(v,2) for k, v in scores.items() if k in TREND_LAYER}
+    momentum_scores = {k: round(v,2) for k, v in scores.items() if k in MOMENTUM_LAYER}
+    liquidity_scores= {k: round(v,2) for k, v in scores.items() if k in LIQUIDITY_LAYER}
+    structure_scores= {k: round(v,2) for k, v in scores.items() if k in STRUCTURE_LAYER}
 
     prompt = f"""
-أنت مراجع تداول ذكي. مهمتك مراجعة قرار التداول.
+أنت مراجع تداول ذكي ومتحفظ. مهمتك مراجعة صفقة قريبة من الدخول.
 
 البيانات:
-- السعر الحالي: {price}
-- الاتجاه المقترح: {direction}
-- النتيجة النهائية: {round(final_score, 2)}
-- أقوى مؤشر: {strongest} = {round(scores[strongest], 2)}
-- أضعف مؤشر: {weakest} = {round(scores[weakest], 2)}
+- السعر: {price}
+- الاتجاه: {direction}
+- الثقة: {round(final_score, 2)} (من 1.0)
 
-🟢 الموشرات القوية (وزنها عالي، رأيها مهم):
-{json.dumps(strong_scores, indent=2)}
+🟢 مؤشرات الاتجاه (الأهم):
+{json.dumps(trend_scores, indent=2)}
 
-🟡 الموشرات المتوسطة:
-{json.dumps(medium_scores, indent=2)}
+🟡 مؤشرات الزخم:
+{json.dumps(momentum_scores, indent=2)}
 
-🔴 الموشرات الضعيفة (وزنها منخفض، لا تعتمد عليها):
-{json.dumps(weak_scores, indent=2)}
+🔵 مؤشرات السيولة:
+{json.dumps(liquidity_scores, indent=2)}
+
+🟣 مؤشرات الهيكل:
+{json.dumps(structure_scores, indent=2)}
 
 أجب بهذا الشكل بالضبط (3 أسطر فقط):
 VERDICT: APPROVE أو REJECT
 REASON: سبب قصير جداً
 ADVICE: نصيحة واحدة قصيرة
 
-قواعد القرار:
-- APPROVE: إذا الموشرات القوية متوافقة والقرار منطقي
-- REJECT: إذا الموشرات القوية متضاربة أو السوق غير واضح أو يوجد خطر عالي
-- تجاهل رأي الموشرات الضعيفة في قرارك
+قواعد:
+- APPROVE: مؤشرات الاتجاه متوافقة والزخم يدعم
+- REJECT: تضارب في مؤشرات الاتجاه أو سيولة ضعيفة جداً أو خطر عالي
+- كن متحفظاً — الهدف حماية الرصيد
 """
 
     try:
@@ -72,7 +80,7 @@ ADVICE: نصيحة واحدة قصيرة
             json={
                 "model": "llama-3.1-8b-instant",
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 200
+                "max_tokens": 150
             },
             timeout=10
         )
@@ -94,7 +102,9 @@ ADVICE: نصيحة واحدة قصيرة
             elif line.startswith("ADVICE:"):
                 advice = line.replace("ADVICE:", "").strip()
 
+        print(f"🤖 Groq → {verdict} | {advice}")
         return verdict, advice
 
     except Exception as e:
         return "APPROVE", f"⚠️ Groq Error: {e}"
+
