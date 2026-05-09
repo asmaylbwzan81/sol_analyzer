@@ -5,7 +5,7 @@ import traceback
 from datetime import datetime
 
 from data_engine import get_klines, get_candles
-from voting_engine import vote, decision, _get_tier, STRONG_BASE
+from layer_decision import layer_decision, print_debug
 from strategy_weights import get_all_weights
 from strategy_rsi import analyze as rsi_analyze
 from strategy_macd import analyze as macd_analyze
@@ -32,10 +32,9 @@ SYMBOLS = [
 ]
 
 SLEEP = 600
-MIN_RANK = 0.60 # الحد الأدنى للـ rank عشان تُبعث
+MIN_RANK = 0.60
 
 def quick_rsi(prices, period=14):
-    """حساب RSI سريع"""
     if len(prices) < period + 1:
         return 50
     gains, losses = [], []
@@ -50,7 +49,6 @@ def quick_rsi(prices, period=14):
     return round(100 - (100 / (1 + rs)), 1)
 
 def quick_adx(candles, period=14):
-    """حساب ADX سريع"""
     try:
         if len(candles) < period + 1:
             return 0
@@ -65,7 +63,6 @@ def quick_adx(candles, period=14):
         return 0
 
 def quick_vol_ratio(candles, period=20):
-    """نسبة الحجم الحالي مقارنة بالمتوسط"""
     try:
         if len(candles) < period + 1:
             return 1.0
@@ -76,7 +73,6 @@ def quick_vol_ratio(candles, period=20):
         return 1.0
 
 def should_analyze(prices, candles):
-    """فلتر سريع — هل في سبب حقيقي للتحليل؟"""
     rsi = quick_rsi(prices)
     adx = quick_adx(candles)
     vol_ratio = quick_vol_ratio(candles)
@@ -93,25 +89,6 @@ def should_analyze(prices, candles):
 
 def generate_signal_id():
     return str(uuid.uuid4())[:8].upper()
-
-def calc_rank(final_score, combined):
-    """
-    rank = (score × 0.7) + (strong_agree_count / 5 × 0.3)
-    """
-    weights = get_all_weights()
-    strong_agree = sum(
-        1 for k, v in combined.items()
-        if _get_tier(k, weights.get(k, 1.0)) == "strong"
-        and (v >= 0.65 or v <= 0.35)
-    )
-    rank = (final_score * 0.7) + (strong_agree / 5 * 0.3)
-
-    # للـ SHORT نعكس الـ score عشان الحساب يكون صح
-    if final_score <= 0.40:
-        inverted = 1.0 - final_score
-        rank = (inverted * 0.7) + (strong_agree / 5 * 0.3)
-
-    return round(rank, 4), strong_agree
 
 def get_scores(symbol, interval):
     try:
@@ -141,7 +118,6 @@ def get_scores(symbol, interval):
         return None, None, None
 
 def analyze_symbol(symbol):
-    """يحلل العملة ويرجع بيانات الإشارة أو None"""
     try:
         scores_1d, _, _ = get_scores(symbol, "1d")
         scores_4h, _, _ = get_scores(symbol, "4h")
@@ -151,10 +127,11 @@ def analyze_symbol(symbol):
         if not scores_1h or not scores_4h or not scores_1d:
             return None
 
-        # ── فلتر سريع قبل التحليل الكامل ──
+        # ── فلتر سريع ──
         if not should_analyze(prices_1h, candles_1h):
             return None
 
+        # ── دمج الإطارات الزمنية ──
         combined = {}
         for key in scores_1h:
             combined[key] = (
@@ -163,11 +140,18 @@ def analyze_symbol(symbol):
                 scores_1h[key] * 0.2
             )
 
-        final_score = vote(combined)
-        action, direction = decision(final_score, combined)
+        # ══ النظام الطبقي الجديد ══
+        result = layer_decision(combined)
+        print_debug(symbol, result)
 
+        action = result["action"]
+        direction = result["direction"]
+
+        if action == "SKIP":
+            return None
+
+        # ── مستويات SL/TP ──
         sl_long, sl_short, tp_long, tp_short = get_levels(candles_1h)
-
         if direction == "LONG":
             sl, tp = sl_long, tp_long
         elif direction == "SHORT":
@@ -175,22 +159,17 @@ def analyze_symbol(symbol):
         else:
             sl, tp = None, None
 
-        verdict, ai_advice = review(combined, final_score, direction, price)
+        # ── AI Reviewer (Groq) ──
+        confidence = result.get("confidence", 0.5)
+        verdict, ai_advice = review(combined, confidence, direction, price)
 
-        print(f"\n🪙 {symbol}")
-        print(f"💰 Price: {price} | ⚖️ Score: {round(final_score, 2)}")
-        print(f"📌 Action: {action} {direction}")
-        print(f"🛑 SL: {sl} | 🎯 TP: {tp}")
-        print(f"🤖 AI Verdict: {verdict}")
-        print(f"💬 AI Advice: {ai_advice}")
-
-        if action == "ENTER" and verdict == "APPROVE":
-            rank, strong_agree = calc_rank(final_score, combined)
-            print(f"🏆 Rank: {rank} | Strong Agree: {strong_agree}")
+        if verdict == "APPROVE":
+            rank = round(confidence, 4)
+            print(f"🏆 Rank: {rank}")
             return {
                 "symbol": symbol,
                 "direction": direction,
-                "score": final_score,
+                "score": confidence,
                 "rank": rank,
                 "price": price,
                 "sl": sl,
@@ -198,10 +177,8 @@ def analyze_symbol(symbol):
                 "ai_advice": ai_advice,
                 "combined": combined,
             }
-        elif action == "ENTER" and verdict == "REJECT":
-            print(f"🚫 AI رفض الإشارة! السبب: {ai_advice}")
         else:
-            print("⏭️ No Trade")
+            print(f"🚫 AI رفض الإشارة! السبب: {ai_advice}")
 
     except Exception as e:
         print(f"❌ Error {symbol}: {e}")
@@ -219,7 +196,6 @@ def main():
         print(f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         check_result()
 
-        # ── جمع كل الإشارات ──
         candidates = []
         for symbol in SYMBOLS:
             result = analyze_symbol(symbol)
@@ -227,15 +203,11 @@ def main():
                 candidates.append(result)
             time.sleep(2)
 
-        # ── اختيار الأقوى ──
         if candidates:
-            # فلتر rank >= MIN_RANK
             qualified = [c for c in candidates if c["rank"] >= MIN_RANK]
 
             if qualified:
-                # الأقوى rank
                 best = max(qualified, key=lambda x: x["rank"])
-
                 signal_id = generate_signal_id()
                 save_signal(signal_id, best["symbol"], best["direction"], best["score"], best["price"])
                 send_signal(
@@ -263,3 +235,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
