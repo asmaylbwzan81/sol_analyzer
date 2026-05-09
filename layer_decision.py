@@ -520,64 +520,61 @@ def _calc_confidence(trend, momentum, structure, liquidity, volatility, ai_layer
 # ══════════════════════════════════════════════════
 
 def print_debug(symbol: str, result: dict):
-    """يطبع تقرير واضح لكل طبقة"""
-    print(f"\n{'━'*50}")
-    print(f"🪙 {symbol} | Action: {result['action']} {result['direction']}")
-    print(f"📝 {result['reason']}")
-
+    """يطبع تقرير مبسط وواضح"""
+    action = result["action"]
+    direction = result["direction"]
     debug = result.get("debug", {})
 
-    # Trend Layer
+    print(f"\n{'━'*45}")
+    print(f"🪙 {symbol}")
+
+    # ── إذا SKIP اطبع السبب وانتهي ──
+    if action == "SKIP":
+        print(f"⏭️ تخطي — {result['reason']}")
+        print(f"{'━'*45}")
+        return
+
+    # ── إذا ENTER اطبع التفاصيل ──
+    confidence = debug.get("final_confidence", "?")
+    print(f"✅ دخول {direction} | ثقة: {confidence}")
+    print()
+
+    # الاتجاه
     if "trend_layer" in debug:
         t = debug["trend_layer"]
-        print(f"\n🟢 Trend Layer → {t['direction']} (confidence={t['confidence']})")
+        print(f"📈 الاتجاه: {t['direction']} ({int(t['confidence']*100)}% توافق)")
         for name, d in t.get("details", {}).items():
             icon = "✅" if d["signal"] != "NEUTRAL" else "⚪"
-            print(f" {icon} {name}: {d['signal']} | {d['reason']}")
+            print(f" {icon} {name}: {d['reason']}")
 
-    # Liquidity Layer
+    # السيولة
     if "liquidity_layer" in debug:
         l = debug["liquidity_layer"]
         icon = "✅" if l["status"] == "PASS" else "🚫"
-        print(f"\n🔵 Liquidity Layer → {icon} {l['status']} | {l['reason']}")
-        for name, d in l.get("details", {}).items():
-            print(f" • {name}: {d['signal']} | {d['reason']}")
+        print(f"\n💧 السيولة: {icon} {l['reason']}")
 
-    # Momentum Layer
+    # الزخم
     if "momentum_layer" in debug:
         m = debug["momentum_layer"]
-        icon = "✅" if m["confirmation"] != "WEAK" else "⚠️"
-        print(f"\n🟡 Momentum Layer → {icon} {m['confirmation']} (ratio={m['confirm_ratio']})")
+        strength = {"STRONG": "قوي ✅", "MODERATE": "متوسط ⚠️", "WEAK": "ضعيف ❌"}
+        print(f"\n⚡ الزخم: {strength.get(m['confirmation'], m['confirmation'])}")
         for name, d in m.get("details", {}).items():
             tick = "✅" if d["confirms_trend"] else "❌"
-            print(f" {tick} {name}: {d['signal']} | {d['reason']}")
+            print(f" {tick} {name}: {d['reason']}")
 
-    # Structure Layer
+    # الهيكل
     if "structure_layer" in debug:
         s = debug["structure_layer"]
         icon = "✅" if s["status"] == "CONFIRM" else "⚠️"
-        print(f"\n🟣 Structure Layer → {icon} {s['status']} (ratio={s['confirm_ratio']})")
+        print(f"\n🏗️ الهيكل: {icon} {s['status']}")
         for name, d in s.get("details", {}).items():
             tick = "✅" if d["confirms_trend"] else "❌"
-            print(f" {tick} {name}: {d['signal']} | {d['reason']}")
+            print(f" {tick} {name}: {d['reason']}")
 
-    # Volatility Layer
+    # التقلب
     if "volatility_layer" in debug:
         v = debug["volatility_layer"]
-        icon = "✅" if v["action"] == "ALLOW" else ("⏳" if v["action"] == "WAIT" else "⚠️")
-        print(f"\n🟠 Volatility Layer → {icon} {v['state']} | {v['reason']}")
+        print(f"\n📊 السوق: {v['reason']}")
 
-    # AI Layer
-    if "ai_layer" in debug:
-        a = debug["ai_layer"]
-        icon = "✅" if a["status"] == "CLEAR" else "⚠️"
-        print(f"\n🤖 AI Layer → {icon} {a['status']}")
-        for name, d in a.get("details", {}).items():
-            print(f" • {name}: {d['signal']} | {d['reason']}")
-
-    # Final
-    if "final_confidence" in debug:
-        print(f"\n🏆 Final Confidence: {debug['final_confidence']}")
-
-    print(f"{'━'*50}")
+    print(f"{'━'*45}")
 
