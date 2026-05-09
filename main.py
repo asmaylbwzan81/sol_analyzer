@@ -32,7 +32,7 @@ SYMBOLS = [
 ]
 
 SLEEP = 600
-MIN_RANK = 0.75
+MIN_RANK = 0.60
 
 def quick_rsi(prices, period=14):
     if len(prices) < period + 1:
@@ -146,9 +146,14 @@ def analyze_symbol(symbol):
         else:
             sl, tp = None, None
 
-        # ── AI Reviewer (Groq) ──
+        # ── AI Reviewer (Groq) — يحلل 3 إطارات ──
         confidence = result.get("confidence", 0.5)
-        verdict, ai_advice = review(combined, confidence, direction, price)
+        verdict, ai_advice = review(
+            combined, confidence, direction, price,
+            scores_1d=scores_1d,
+            scores_4h=scores_4h,
+            scores_1h=scores_1h
+        )
 
         if verdict == "APPROVE":
             rank = round(confidence, 4)
