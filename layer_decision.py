@@ -432,7 +432,15 @@ def layer_decision(combined: dict) -> dict:
     structure = _analyze_structure(combined, direction)
     debug["structure_layer"] = structure
 
-    # الهيكل لا يمنع الدخول لكن يضعف الثقة
+    # إذا كل مؤشرات الهيكل ضد الاتجاه → SKIP
+    if structure.get("confirm_ratio", 0) == 0.0 and structure.get("status") != "NEUTRAL":
+        return {
+            "action": "SKIP",
+            "direction": direction,
+            "reason": f"❌ Structure Layer: السعر عند مقاومة — 0/3 مؤشرات تؤكد {direction}",
+            "debug": debug
+        }
+
     structure_ok = (structure["status"] == "CONFIRM")
 
     # ── STEP 5: التقلب ───────────────────────────
@@ -520,29 +528,29 @@ def _calc_confidence(trend, momentum, structure, liquidity, volatility, ai_layer
 # ══════════════════════════════════════════════════
 
 def print_debug(symbol: str, result: dict):
-    """يطبع تقرير مبسط وواضح"""
+    """يطبع تقرير مبسط وواضح مع فاصل بين العملات"""
     action = result["action"]
     direction = result["direction"]
     debug = result.get("debug", {})
 
-    print(f"\n{'━'*45}")
+    print(f"\n{'═'*50}")
     print(f"🪙 {symbol}")
+    print(f"{'─'*50}")
 
     # ── إذا SKIP اطبع السبب وانتهي ──
     if action == "SKIP":
         print(f"⏭️ تخطي — {result['reason']}")
-        print(f"{'━'*45}")
+        print(f"{'═'*50}")
         return
 
     # ── إذا ENTER اطبع التفاصيل ──
     confidence = debug.get("final_confidence", "?")
     print(f"✅ دخول {direction} | ثقة: {confidence}")
-    print()
 
     # الاتجاه
     if "trend_layer" in debug:
         t = debug["trend_layer"]
-        print(f"📈 الاتجاه: {t['direction']} ({int(t['confidence']*100)}% توافق)")
+        print(f"\n📈 الاتجاه: {t['direction']} ({int(t['confidence']*100)}% توافق)")
         for name, d in t.get("details", {}).items():
             icon = "✅" if d["signal"] != "NEUTRAL" else "⚪"
             print(f" {icon} {name}: {d['reason']}")
@@ -576,5 +584,5 @@ def print_debug(symbol: str, result: dict):
         v = debug["volatility_layer"]
         print(f"\n📊 السوق: {v['reason']}")
 
-    print(f"{'━'*45}")
+    print(f"\n{'═'*50}")
 
