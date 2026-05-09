@@ -125,7 +125,7 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d):
 
 
 # ══════════════════════════════════════════════════════════════
-# 🦙 الذكاء الثاني: OpenRouter (70B — أقوى)
+# 🦙 الذكاء الثاني: OpenRouter (auto — يختار أفضل موديل مجاني تلقائياً)
 # ══════════════════════════════════════════════════════════════
 def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d):
     if not OPENROUTER_API_KEY:
@@ -142,7 +142,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d):
                 "HTTP-Referer": "https://github.com/smart_analyzer",
             },
             json={
-                "model": "meta-llama/llama-3.1-70b-instruct:free",
+                "model": "openrouter/free",
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 150
             },
