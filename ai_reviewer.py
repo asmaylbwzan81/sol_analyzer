@@ -5,7 +5,7 @@ import json
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 # ── الحد الأدنى للثقة عشان Groq يشتغل ──────
-MIN_CONFIDENCE_FOR_REVIEW = 0.70
+MIN_CONFIDENCE_FOR_REVIEW = 0.75
 
 def review(scores, final_score, direction, price):
     """
