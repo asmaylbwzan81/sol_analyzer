@@ -48,20 +48,6 @@ def quick_rsi(prices, period=14):
     rs = avg_gain / avg_loss
     return round(100 - (100 / (1 + rs)), 1)
 
-def quick_adx(candles, period=14):
-    try:
-        if len(candles) < period + 1:
-            return 0
-        trs = []
-        for i in range(1, len(candles)):
-            h, l, pc = candles[i]["high"], candles[i]["low"], candles[i-1]["close"]
-            trs.append(max(h - l, abs(h - pc), abs(l - pc)))
-        atr = sum(trs[-period:]) / period
-        if atr == 0: return 0
-        return round(min(sum(trs[-period:]) / (atr * period) * 25, 100), 1)
-    except:
-        return 0
-
 def quick_vol_ratio(candles, period=20):
     try:
         if len(candles) < period + 1:
@@ -74,17 +60,18 @@ def quick_vol_ratio(candles, period=20):
 
 def should_analyze(prices, candles):
     rsi = quick_rsi(prices)
-    adx = quick_adx(candles)
+    adx_score = adx_analyze(candles) # الحساب الحقيقي بدل quick_adx المكسور
     vol_ratio = quick_vol_ratio(candles)
     reason = []
     if rsi < 35: reason.append(f"RSI oversold {rsi}")
     if rsi > 65: reason.append(f"RSI overbought {rsi}")
-    if adx > 25: reason.append(f"ADX strong {adx}")
+    if adx_score >= 0.65 or adx_score <= 0.35:
+        reason.append(f"ADX إشارة قوية ({adx_score})")
     if vol_ratio > 1.5: reason.append(f"Volume spike {vol_ratio}x")
     if reason:
         print(f"✅ فلتر اجتاز: {' | '.join(reason)}")
         return True
-    print(f"⏭️ فلتر: RSI={rsi} ADX={adx} Vol={vol_ratio}x — تخطي")
+    print(f"⏭️ فلتر: RSI={rsi} ADX={adx_score} Vol={vol_ratio}x — تخطي")
     return False
 
 def generate_signal_id():
