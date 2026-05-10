@@ -36,7 +36,6 @@ def _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h):
 def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None, second_layer=False):
     note = "(هذه المراجعة الثانية — Groq وافق بالفعل، أنت الحكم الأخير)\n" if second_layer else ""
 
-    # ── السجل التاريخي ──
     if pattern_stats and pattern_stats.get("total", 0) > 0:
         history_line = f"📊 السجل التاريخي: {pattern_stats['text']}"
     else:
@@ -85,6 +84,8 @@ ADVICE: نصيحة واحدة بالعربي
 # 🔍 تحليل الرد (مشترك)
 # ══════════════════════════════════════════════════════════════
 def _parse_response(text):
+    if not text: # ✅ فحص None أو فاضي
+        return "REJECT", "رد فارغ من الذكاء", ""
     verdict = "APPROVE"
     reason = ""
     advice = ""
@@ -127,7 +128,7 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_sta
         if "choices" not in data:
             return "REJECT", f"خطأ: {data.get('error', {}).get('message', 'خطأ غير معروف')}", ""
 
-        text = data["choices"][0]["message"]["content"].strip()
+        text = data["choices"][0]["message"]["content"]
         verdict, reason, advice = _parse_response(text)
         print(f"🤖 Groq → {verdict} | {reason} | {advice}")
         return verdict, reason, advice
@@ -170,7 +171,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
             print(f"⚠️ OpenRouter Error: {data}")
             return "REJECT", "خطأ في OpenRouter", ""
 
-        text = data["choices"][0]["message"]["content"].strip()
+        text = data["choices"][0]["message"]["content"]
         verdict, reason, advice = _parse_response(text)
         print(f"🦙 OpenRouter → {verdict} | {reason} | {advice}")
         return verdict, reason, advice
@@ -195,30 +196,24 @@ def review(scores, final_score, direction, price,
     يرجع: (verdict, ai_advice, groq_reason, or_reason)
     """
 
-    # ── فلتر 1: بس الصفقات القوية ──────────
     if final_score < MIN_CONFIDENCE_FOR_REVIEW:
         print(f"⏭️ AI Review تخطى — confidence={round(final_score,2)} أقل من {MIN_CONFIDENCE_FOR_REVIEW}")
         return "APPROVE", f"ثقة منخفضة ({round(final_score,2)}) — تم القبول التلقائي", "", ""
 
-    # ── فلتر 2: بس LONG أو SHORT ────────────
     if direction not in ("LONG", "SHORT"):
         return "REJECT", "اتجاه غير واضح", "", ""
 
-    # ── تجهيز البيانات ──────────────────────
     tf_1h, tf_4h, tf_1d = _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h)
 
-    # ── الذكاء الأول: Groq ───────────────────
     groq_verdict, groq_reason, groq_advice = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
     if groq_verdict == "REJECT":
         return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, ""
 
-    # ── الذكاء الثاني: OpenRouter ────────────
     or_verdict, or_reason, or_advice = _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
     if or_verdict == "REJECT":
         return "REJECT", f"🦙 OpenRouter رفض: {or_reason}", groq_reason, or_reason
 
-    # ── كلاهم وافق ✅ ────────────────────────
     return "APPROVE", "✅ Groq + OpenRouter وافقا", groq_reason, or_reason
 
