@@ -1,3 +1,5 @@
+أنا
+
 import requests
 import os
 import time
@@ -21,8 +23,8 @@ def _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h):
     def extract(ind):
         return {
             "rsi": ind.get("rsi", 0.5),
-            "adx": ind.get("adx", 0.5),
-            "ema": ind.get("ema", 0.5),
+            "chop": ind.get("chop", 0.5), # ✅ بدل adx
+            "hma": ind.get("hma", 0.5), # ✅ بدل ema
             "macd": ind.get("macd", 0.5),
             "volume": ind.get("volume", 0.5),
         }
@@ -36,7 +38,6 @@ def _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h):
 def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None, second_layer=False):
     note = "(هذه المراجعة الثانية — Groq وافق بالفعل، أنت الحكم الأخير)\n" if second_layer else ""
 
-    # ── السجل التاريخي ── ✅ معدل
     if pattern_stats and pattern_stats.get("total", 0) > 0:
         history_line = f"📊 السجل التاريخي: {pattern_stats['text']} — خذه بعين الاعتبار مع التحليل"
         history_rule = "- إذا كان السجل التاريخي إيجابياً (فوق 60%) = عامل داعم للدخول"
@@ -54,22 +55,22 @@ def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_st
 {history_line}
 
 📊 مؤشرات الساعة (1H):
-- RSI: {tf_1h['rsi']} | ADX: {tf_1h['adx']}
-- EMA: {tf_1h['ema']} | MACD: {tf_1h['macd']}
+- RSI: {tf_1h['rsi']} | CHOP: {tf_1h['chop']}
+- HMA: {tf_1h['hma']} | MACD: {tf_1h['macd']}
 - Volume: {tf_1h['volume']}
 
 📊 مؤشرات 4 ساعات (4H):
-- RSI: {tf_4h['rsi']} | ADX: {tf_4h['adx']}
-- EMA: {tf_4h['ema']} | MACD: {tf_4h['macd']}
+- RSI: {tf_4h['rsi']} | CHOP: {tf_4h['chop']}
+- HMA: {tf_4h['hma']} | MACD: {tf_4h['macd']}
 
 📊 مؤشرات يومي (1D):
-- RSI: {tf_1d['rsi']} | ADX: {tf_1d['adx']}
-- EMA: {tf_1d['ema']} | MACD: {tf_1d['macd']}
+- RSI: {tf_1d['rsi']} | CHOP: {tf_1d['chop']}
+- HMA: {tf_1d['hma']} | MACD: {tf_1d['macd']}
 
 قواعد (القيم بين 0-1):
 - RSI < 0.35 = تشبع بيع → LONG | RSI > 0.65 = تشبع شراء → SHORT
-- EMA > 0.5 = صاعد | EMA < 0.5 = هابط
-- ADX > 0.6 = ترند قوي | ADX < 0.4 = ضعيف
+- HMA > 0.5 = صاعد | HMA < 0.5 = هابط
+- CHOP > 0.6 = ترند قوي | CHOP < 0.4 = سوق متذبذب
 - MACD > 0.5 = زخم صاعد | MACD < 0.5 = هابط
 {history_rule}
 
@@ -80,7 +81,7 @@ ADVICE: نصيحة واحدة بالعربي
 
 قواعد القرار:
 - APPROVE: 3 إطارات متوافقة والاتجاه واضح
-- REJECT: تضارب بين الإطارات أو ADX ضعيف
+- REJECT: تضارب بين الإطارات أو CHOP ضعيف
 - كن صارماً — حماية الرصيد أولاً
 - أجب بالعربية فقط
 """
@@ -217,11 +218,6 @@ def _review_llama70(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_
 # ══════════════════════════════════════════════════════════════
 def review(scores, final_score, direction, price,
            scores_1d=None, scores_4h=None, scores_1h=None, pattern_stats=None):
-    """
-    تسلسل: Groq أولاً ← لو وافق ← Llama 70B
-    يرجع: (verdict, ai_advice, groq_reason, or_reason)
-    """
-
     if final_score < MIN_CONFIDENCE_FOR_REVIEW:
         print(f"⏭️ AI Review تخطى — confidence={round(final_score,2)} أقل من {MIN_CONFIDENCE_FOR_REVIEW}")
         return "APPROVE", f"ثقة منخفضة ({round(final_score,2)}) — تم القبول التلقائي", "", ""
