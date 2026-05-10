@@ -62,8 +62,8 @@ def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, second_lay
 
 أجب بهذا الشكل بالضبط (3 أسطر):
 VERDICT: APPROVE أو REJECT
-REASON: سبب قصير
-ADVICE: نصيحة واحدة
+REASON: سبب قصير بالعربي
+ADVICE: نصيحة واحدة بالعربي
 
 قواعد القرار:
 - APPROVE: 3 إطارات متوافقة والاتجاه واضح
@@ -77,15 +77,18 @@ ADVICE: نصيحة واحدة
 # ══════════════════════════════════════════════════════════════
 def _parse_response(text):
     verdict = "APPROVE"
-    advice = text
+    reason = ""
+    advice = ""
     for line in text.split("\n"):
         line = line.strip()
         if line.startswith("VERDICT:"):
             v = line.replace("VERDICT:", "").strip().upper()
             verdict = "REJECT" if "REJECT" in v else "APPROVE"
+        elif line.startswith("REASON:"):
+            reason = line.replace("REASON:", "").strip()
         elif line.startswith("ADVICE:"):
             advice = line.replace("ADVICE:", "").strip()
-    return verdict, advice
+    return verdict, reason, advice
 
 
 # ══════════════════════════════════════════════════════════════
@@ -93,7 +96,7 @@ def _parse_response(text):
 # ══════════════════════════════════════════════════════════════
 def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d):
     if not GROQ_API_KEY:
-        return "REJECT", "⚠️ No Groq API Key — رُفضت الصفقة"
+        return "REJECT", "لا يوجد Groq API Key", ""
 
     prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, second_layer=False)
 
@@ -109,32 +112,32 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d):
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 150
             },
-            timeout=30 # ✅ مهلة 30 ثانية
+            timeout=30
         )
         data = res.json()
         if "choices" not in data:
-            return "REJECT", f"⚠️ Groq: {data.get('error', {}).get('message', 'خطأ غير معروف')} — رُفضت الصفقة"
+            return "REJECT", f"خطأ: {data.get('error', {}).get('message', 'خطأ غير معروف')}", ""
 
         text = data["choices"][0]["message"]["content"].strip()
-        verdict, advice = _parse_response(text)
-        print(f"🤖 Groq → {verdict} | {advice}")
-        return verdict, advice
+        verdict, reason, advice = _parse_response(text)
+        print(f"🤖 Groq → {verdict} | {reason} | {advice}")
+        return verdict, reason, advice
 
     except requests.exceptions.Timeout:
         print("⏰ Groq تجاوز مهلة 30 ثانية — رُفضت الصفقة")
-        return "REJECT", "⏰ Groq لم يرد خلال 30 ثانية — رُفضت الصفقة"
+        return "REJECT", "لم يرد Groq خلال 30 ثانية", ""
 
     except Exception as e:
         print(f"❌ Groq Error: {e}")
-        return "REJECT", f"❌ Groq Error: {e} — رُفضت الصفقة"
+        return "REJECT", f"خطأ في Groq: {e}", ""
 
 
 # ══════════════════════════════════════════════════════════════
-# 🦙 الذكاء الثاني: OpenRouter (auto — يختار أفضل موديل مجاني تلقائياً)
+# 🦙 الذكاء الثاني: OpenRouter
 # ══════════════════════════════════════════════════════════════
 def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d):
     if not OPENROUTER_API_KEY:
-        return "REJECT", "⚠️ No OpenRouter API Key — رُفضت الصفقة"
+        return "REJECT", "لا يوجد OpenRouter API Key", ""
 
     prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, second_layer=True)
 
@@ -151,61 +154,62 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d):
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 150
             },
-            timeout=40 # ✅ مهلة 40 ثانية (أطول لأنه أبطأ)
+            timeout=40
         )
         data = res.json()
         if "choices" not in data:
             print(f"⚠️ OpenRouter Error: {data}")
-            return "REJECT", "⚠️ OpenRouter خطأ — رُفضت الصفقة"
+            return "REJECT", "خطأ في OpenRouter", ""
 
         text = data["choices"][0]["message"]["content"].strip()
-        verdict, advice = _parse_response(text)
-        print(f"🦙 OpenRouter → {verdict} | {advice}")
-        return verdict, advice
+        verdict, reason, advice = _parse_response(text)
+        print(f"🦙 OpenRouter → {verdict} | {reason} | {advice}")
+        return verdict, reason, advice
 
     except requests.exceptions.Timeout:
         print("⏰ OpenRouter تجاوز مهلة 40 ثانية — رُفضت الصفقة")
-        return "REJECT", "⏰ OpenRouter لم يرد خلال 40 ثانية — رُفضت الصفقة"
+        return "REJECT", "لم يرد OpenRouter خلال 40 ثانية", ""
 
     except Exception as e:
         print(f"❌ OpenRouter Error: {e}")
-        return "REJECT", f"❌ OpenRouter Error: {e} — رُفضت الصفقة"
+        return "REJECT", f"خطأ في OpenRouter: {e}", ""
 
 
 # ══════════════════════════════════════════════════════════════
-# 🚀 الدالة الرئيسية — نفس الاسم القديم (ما تكسر main.py)
+# 🚀 الدالة الرئيسية
 # ══════════════════════════════════════════════════════════════
 def review(scores, final_score, direction, price,
            scores_1d=None, scores_4h=None, scores_1h=None):
     """
     طبقة مزدوجة: Groq أولاً ثم OpenRouter
     كلاهم لازم يوافقون — وإلا REJECT
+    يرجع: (verdict, ai_advice, groq_reason, or_reason)
     """
 
     # ── فلتر 1: بس الصفقات القوية ──────────
     if final_score < MIN_CONFIDENCE_FOR_REVIEW:
         print(f"⏭️ AI Review تخطى — confidence={round(final_score,2)} أقل من {MIN_CONFIDENCE_FOR_REVIEW}")
-        return "APPROVE", f"⏭️ ثقة منخفضة ({round(final_score,2)}) — تم القبول التلقائي"
+        return "APPROVE", f"ثقة منخفضة ({round(final_score,2)}) — تم القبول التلقائي", "", ""
 
     # ── فلتر 2: بس LONG أو SHORT ────────────
     if direction not in ("LONG", "SHORT"):
-        return "REJECT", "⏭️ اتجاه غير واضح"
+        return "REJECT", "اتجاه غير واضح", "", ""
 
     # ── تجهيز البيانات ──────────────────────
     tf_1h, tf_4h, tf_1d = _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h)
 
     # ── الذكاء الأول: Groq ───────────────────
-    groq_verdict, groq_advice = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d)
+    groq_verdict, groq_reason, groq_advice = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d)
 
     if groq_verdict == "REJECT":
-        return "REJECT", f"🤖 Groq رفض: {groq_advice}"
+        return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, ""
 
-    # ── الذكاء الثاني: OpenRouter (بس لو Groq وافق) ──
-    or_verdict, or_advice = _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d)
+    # ── الذكاء الثاني: OpenRouter ────────────
+    or_verdict, or_reason, or_advice = _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d)
 
     if or_verdict == "REJECT":
-        return "REJECT", f"🦙 OpenRouter رفض: {or_advice}"
+        return "REJECT", f"🦙 OpenRouter رفض: {or_reason}", groq_reason, or_reason
 
     # ── كلاهم وافق ✅ ────────────────────────
-    return "APPROVE", f"✅ Groq + OpenRouter وافقا | {or_advice}"
+    return "APPROVE", "✅ Groq + OpenRouter وافقا", groq_reason, or_reason
 
