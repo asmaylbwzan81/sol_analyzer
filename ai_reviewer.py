@@ -1,7 +1,6 @@
 import requests
 import os
 import time
-import threading
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
@@ -35,7 +34,7 @@ def _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h):
 # 📝 بناء الـ Prompt
 # ══════════════════════════════════════════════════════════════
 def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None, second_layer=False):
-    note = "(هذه مراجعة متزامنة — أنت والذكاء الثاني يحللان معاً)\n" if second_layer else ""
+    note = "(هذه المراجعة الثانية — Groq وافق بالفعل، أنت الحكم الأخير)\n" if second_layer else ""
 
     if pattern_stats and pattern_stats.get("total", 0) > 0:
         history_line = f"📊 السجل التاريخي: {pattern_stats['text']}"
@@ -175,7 +174,7 @@ def _review_llama70(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "llama-3.3-70b-versatile", # ✅ Llama 3.3 70B
+                    "model": "llama-3.3-70b-versatile",
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 150
                 },
@@ -209,13 +208,13 @@ def _review_llama70(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_
 
 
 # ══════════════════════════════════════════════════════════════
-# 🚀 الدالة الرئيسية — بالتوازي ✅
+# 🚀 الدالة الرئيسية — تسلسل ✅ (توفير طلبات Llama 70B)
 # ══════════════════════════════════════════════════════════════
 def review(scores, final_score, direction, price,
            scores_1d=None, scores_4h=None, scores_1h=None, pattern_stats=None):
     """
-    طبقة مزدوجة: Llama 8B وLlama 70B يشتغلوا بالتوازي على Groq
-    كلاهم لازم يوافقون — وإلا REJECT
+    تسلسل: Groq أولاً ← لو وافق ← Llama 70B
+    لو Groq رفض = ما يوصل Llama 70B = توفير الطلبات
     يرجع: (verdict, ai_advice, groq_reason, or_reason)
     """
 
@@ -228,29 +227,15 @@ def review(scores, final_score, direction, price,
 
     tf_1h, tf_4h, tf_1d = _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h)
 
-    results = {}
-
-    def run_groq():
-        results["groq"] = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
-
-    def run_llama70():
-        results["or"] = _review_llama70(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
-
-    # ── تشغيل بالتوازي ✅ ──
-    t1 = threading.Thread(target=run_groq)
-    t2 = threading.Thread(target=run_llama70)
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-
-    groq_verdict, groq_reason, _ = results.get("groq", ("REJECT", "خطأ في Groq", ""))
-    or_verdict, or_reason, _ = results.get("or", ("REJECT", "خطأ في Llama 70B", ""))
-
-    print(f"🤖 Groq: {groq_verdict} | 🦙 Llama70B: {or_verdict}")
+    # ── الذكاء الأول: Groq ───────────────────
+    groq_verdict, groq_reason, _ = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
     if groq_verdict == "REJECT":
-        return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, or_reason
+        print(f"🤖 Groq رفض — ما يوصل Llama 70B")
+        return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, ""
+
+    # ── الذكاء الثاني: Llama 70B (بس لو Groq وافق) ──
+    or_verdict, or_reason, _ = _review_llama70(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
     if or_verdict == "REJECT":
         return "REJECT", f"🦙 Llama رفض: {or_reason}", groq_reason, or_reason
