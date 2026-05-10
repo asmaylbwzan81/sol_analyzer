@@ -61,7 +61,7 @@ def quick_vol_ratio(candles, period=20):
 
 def should_analyze(prices, candles):
     rsi = quick_rsi(prices)
-    adx_score = adx_analyze(candles) # الحساب الحقيقي بدل quick_adx المكسور
+    adx_score = adx_analyze(candles)
     vol_ratio = quick_vol_ratio(candles)
     reason = []
     if rsi < 35: reason.append(f"RSI oversold {rsi}")
@@ -147,9 +147,9 @@ def analyze_symbol(symbol):
         else:
             sl, tp = None, None
 
-        # ── AI Reviewer (Groq) — يحلل 3 إطارات ──
+        # ── AI Reviewer (Groq + OpenRouter) ──
         confidence = result.get("confidence", 0.5)
-        verdict, ai_advice = review(
+        verdict, ai_advice, groq_reason, or_reason = review(
             combined, confidence, direction, price,
             scores_1d=scores_1d,
             scores_4h=scores_4h,
@@ -168,6 +168,8 @@ def analyze_symbol(symbol):
                 "sl": sl,
                 "tp": tp,
                 "ai_advice": ai_advice,
+                "groq_reason": groq_reason,
+                "or_reason": or_reason,
                 "combined": combined,
             }
         else:
@@ -211,6 +213,8 @@ def main():
                     best["score"],
                     best["price"],
                     best["ai_advice"],
+                    best["groq_reason"], # ✅ جديد
+                    best["or_reason"], # ✅ جديد
                     best["combined"],
                     best["sl"],
                     best["tp"]
