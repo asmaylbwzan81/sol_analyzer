@@ -4,7 +4,6 @@ import time
 import threading
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 MIN_CONFIDENCE_FOR_REVIEW = 0.75
 
@@ -33,7 +32,7 @@ def _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h):
 
 
 # ══════════════════════════════════════════════════════════════
-# 📝 بناء الـ Prompt (مشترك بين الاثنين)
+# 📝 بناء الـ Prompt
 # ══════════════════════════════════════════════════════════════
 def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None, second_layer=False):
     note = "(هذه مراجعة متزامنة — أنت والذكاء الثاني يحللان معاً)\n" if second_layer else ""
@@ -105,7 +104,7 @@ def _parse_response(text):
 
 
 # ══════════════════════════════════════════════════════════════
-# 🤖 الذكاء الأول: Groq (8B — سريع)
+# 🤖 الذكاء الأول: Groq — Llama 3.1 8B (سريع)
 # ══════════════════════════════════════════════════════════════
 def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
     if not GROQ_API_KEY:
@@ -157,11 +156,11 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_sta
 
 
 # ══════════════════════════════════════════════════════════════
-# 🐼 الذكاء الثاني: Qwen3 80B — من Alibaba
+# 🧬 الذكاء الثاني: Groq — Qwen3 32B (أذكى)
 # ══════════════════════════════════════════════════════════════
-def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
-    if not OPENROUTER_API_KEY:
-        return "REJECT", "لا يوجد OpenRouter API Key", ""
+def _review_qwen(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
+    if not GROQ_API_KEY:
+        return "REJECT", "لا يوجد Groq API Key", ""
 
     prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats, second_layer=True)
     deadline = time.time() + 40
@@ -170,14 +169,13 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
         try:
             remaining = deadline - time.time()
             res = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
+                "https://api.groq.com/openai/v1/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://github.com/smart_analyzer",
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json"
                 },
                 json={
-                    "model": "qwen/qwen3-next-80b-a3b-instruct:free", # ✅ Qwen3 80B مجاني
+                    "model": "qwen-qwq-32b", # ✅ Qwen3 32B على Groq
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 150
                 },
@@ -196,7 +194,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
 
             text = data["choices"][0]["message"]["content"]
             verdict, reason, advice = _parse_response(text)
-            print(f"🐼 Qwen3 → {verdict} | {reason}")
+            print(f"🧬 Qwen3 → {verdict} | {reason}")
             return verdict, reason, advice
 
         except requests.exceptions.Timeout:
@@ -216,7 +214,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
 def review(scores, final_score, direction, price,
            scores_1d=None, scores_4h=None, scores_1h=None, pattern_stats=None):
     """
-    طبقة مزدوجة: Groq وQwen3 يشتغلوا بالتوازي
+    طبقة مزدوجة: Llama 8B وQwen3 32B يشتغلوا بالتوازي على Groq
     كلاهم لازم يوافقون — وإلا REJECT
     يرجع: (verdict, ai_advice, groq_reason, or_reason)
     """
@@ -236,7 +234,7 @@ def review(scores, final_score, direction, price,
         results["groq"] = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
     def run_qwen():
-        results["or"] = _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
+        results["or"] = _review_qwen(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
     # ── تشغيل بالتوازي ✅ ──
     t1 = threading.Thread(target=run_groq)
@@ -249,13 +247,13 @@ def review(scores, final_score, direction, price,
     groq_verdict, groq_reason, _ = results.get("groq", ("REJECT", "خطأ في Groq", ""))
     or_verdict, or_reason, _ = results.get("or", ("REJECT", "خطأ في Qwen3", ""))
 
-    print(f"🤖 Groq: {groq_verdict} | 🐼 Qwen3: {or_verdict}")
+    print(f"🤖 Groq: {groq_verdict} | 🧬 Qwen3: {or_verdict}")
 
     if groq_verdict == "REJECT":
         return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, or_reason
 
     if or_verdict == "REJECT":
-        return "REJECT", f"🐼 Qwen3 رفض: {or_reason}", groq_reason, or_reason
+        return "REJECT", f"🧬 Qwen3 رفض: {or_reason}", groq_reason, or_reason
 
     return "APPROVE", "✅ Groq + Qwen3 وافقا", groq_reason, or_reason
 
