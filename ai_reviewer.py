@@ -156,7 +156,7 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_sta
 
 
 # ══════════════════════════════════════════════════════════════
-# 🧠 الذكاء الثاني: OpenRouter — DeepSeek R1 (أقوى)
+# 🐋 الذكاء الثاني: DeepSeek R1 (أقوى)
 # ══════════════════════════════════════════════════════════════
 def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
     if not OPENROUTER_API_KEY:
@@ -176,7 +176,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
                     "HTTP-Referer": "https://github.com/smart_analyzer",
                 },
                 json={
-                    "model": "deepseek/deepseek-r1-0528:free", # ✅ DeepSeek R1 — أقوى وأكثر استقراراً
+                    "model": "deepseek/deepseek-r1:free", # ✅ DeepSeek R1 الأصلي
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 150
                 },
@@ -195,7 +195,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
 
             text = data["choices"][0]["message"]["content"]
             verdict, reason, advice = _parse_response(text)
-            print(f"🧠 DeepSeek → {verdict} | {reason}")
+            print(f"🐋 DeepSeek → {verdict} | {reason}")
             return verdict, reason, advice
 
         except requests.exceptions.Timeout:
@@ -248,13 +248,13 @@ def review(scores, final_score, direction, price,
     groq_verdict, groq_reason, _ = results.get("groq", ("REJECT", "خطأ في Groq", ""))
     or_verdict, or_reason, _ = results.get("or", ("REJECT", "خطأ في DeepSeek", ""))
 
-    print(f"🤖 Groq: {groq_verdict} | 🧠 DeepSeek: {or_verdict}")
+    print(f"🤖 Groq: {groq_verdict} | 🐋 DeepSeek: {or_verdict}")
 
     if groq_verdict == "REJECT":
         return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, or_reason
 
     if or_verdict == "REJECT":
-        return "REJECT", f"🧠 DeepSeek رفض: {or_reason}", groq_reason, or_reason
+        return "REJECT", f"🐋 DeepSeek رفض: {or_reason}", groq_reason, or_reason
 
     return "APPROVE", "✅ Groq + DeepSeek وافقا", groq_reason, or_reason
 
