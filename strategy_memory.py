@@ -1,3 +1,4 @@
+
 import sqlite3
 import json
 import os
@@ -25,10 +26,34 @@ def setup_db():
             time TEXT
         )
     """)
+    # ── جدول الأنماط الجديد ──
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS patterns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id TEXT,
+            symbol TEXT,
+            direction TEXT,
+            rsi_zone TEXT,
+            adx_zone TEXT,
+            ema_zone TEXT,
+            macd_zone TEXT,
+            result TEXT,
+            time TEXT
+        )
+    """)
     conn.commit()
     conn.close()
 
-def save_signal(signal_id, symbol, direction, score, price):
+def _get_zone(value):
+    """تحويل القيمة لمنطقة: LOW / MID / HIGH"""
+    if value < 0.35:
+        return "LOW"
+    elif value > 0.65:
+        return "HIGH"
+    else:
+        return "MID"
+
+def save_signal(signal_id, symbol, direction, score, price, scores=None):
     setup_db()
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -36,6 +61,22 @@ def save_signal(signal_id, symbol, direction, score, price):
         INSERT INTO signals VALUES (NULL,?,?,?,?,?,NULL,NULL,?)
     """, (signal_id, symbol, direction, score, price,
           datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+
+    # ── حفظ النمط لو في scores ──
+    if scores:
+        c.execute("""
+            INSERT INTO patterns VALUES (NULL,?,?,?,?,?,?,?,NULL,?)
+        """, (
+            signal_id,
+            symbol,
+            direction,
+            _get_zone(scores.get("rsi", 0.5)),
+            _get_zone(scores.get("adx", 0.5)),
+            _get_zone(scores.get("ema", 0.5)),
+            _get_zone(scores.get("macd", 0.5)),
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ))
+
     conn.commit()
     conn.close()
 
@@ -44,6 +85,9 @@ def update_result(signal_id, result, pnl):
     c = conn.cursor()
     c.execute("UPDATE signals SET result=?, pnl=? WHERE signal_id=?",
               (result, pnl, signal_id))
+    # ── تحديث النتيجة في جدول الأنماط كمان ──
+    c.execute("UPDATE patterns SET result=? WHERE signal_id=?",
+              (result, signal_id))
     conn.commit()
     conn.close()
 
@@ -73,6 +117,7 @@ def check_results_from_redis():
         print(f"⚠️ خطأ قراءة النتائج: {e}")
 
 def analyze(symbol):
+    """نسبة فوز العملة — نفس الدالة القديمة"""
     setup_db()
     check_results_from_redis()
     conn = sqlite3.connect(DB_FILE)
@@ -86,3 +131,36 @@ def analyze(symbol):
 
     wins = sum(1 for d in data if d[0] == "WIN")
     return wins / len(data)
+
+def get_pattern_stats(scores, direction):
+    """
+    يرجع إحصائيات النمط المشابه للحالي
+    مثل: {'total': 20, 'wins': 14, 'win_rate': 0.70, 'text': '...'}
+    """
+    setup_db()
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+
+    rsi_zone = _get_zone(scores.get("rsi", 0.5))
+    adx_zone = _get_zone(scores.get("adx", 0.5))
+    ema_zone = _get_zone(scores.get("ema", 0.5))
+    macd_zone = _get_zone(scores.get("macd", 0.5))
+
+    c.execute("""
+        SELECT result FROM patterns
+        WHERE direction=? AND rsi_zone=? AND adx_zone=? AND ema_zone=? AND result IN ('WIN','LOSS')
+    """, (direction, rsi_zone, adx_zone, ema_zone))
+
+    data = c.fetchall()
+    conn.close()
+
+    if not data:
+        return {"total": 0, "wins": 0, "win_rate": 0.5, "text": "لا يوجد سجل تاريخي لهذا النمط"}
+
+    total = len(data)
+    wins = sum(1 for d in data if d[0] == "WIN")
+    win_rate = round(wins / total, 2)
+
+    text = f"هذا النمط تكرر {total} مرة — فاز {wins} مرة ({int(win_rate*100)}%)"
+    return {"total": total, "wins": wins, "win_rate": win_rate, "text": text}
+
