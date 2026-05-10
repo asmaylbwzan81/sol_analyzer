@@ -10,7 +10,7 @@ SIGNAL_KEY = "signal:pending"
 RESULT_KEY = "signal:result"
 
 
-def send_signal(signal_id, symbol, direction, score, price, ai_advice, scores, sl, tp):
+def send_signal(signal_id, symbol, direction, score, price, ai_advice, groq_reason, or_reason, scores, sl, tp):
     try:
         r = Redis(url=UPSTASH_URL, token=UPSTASH_TOKEN)
 
@@ -43,6 +43,8 @@ def send_signal(signal_id, symbol, direction, score, price, ai_advice, scores, s
             # ── حقول إضافية ──
             "score": round(score, 2),
             "ai_advice": ai_advice,
+            "groq_reason": groq_reason, # ✅ جديد
+            "or_reason": or_reason, # ✅ جديد
             "status": "pending",
             "strategies_used": list(scores.keys()),
         }
@@ -69,7 +71,6 @@ def send_startup():
 def check_result():
     """
     يقرأ نتيجة الصفقة من Redis ويحدث أوزان الاستراتيجيات.
-    my_bot_2026 يرسل: {signal_id, result: WIN/LOSS, strategies_used}
     """
     try:
         r = Redis(url=UPSTASH_URL, token=UPSTASH_TOKEN)
