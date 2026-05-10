@@ -93,7 +93,7 @@ def _parse_response(text):
 # ══════════════════════════════════════════════════════════════
 def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d):
     if not GROQ_API_KEY:
-        return "APPROVE", "⚠️ No Groq API Key — تم القبول التلقائي"
+        return "REJECT", "⚠️ No Groq API Key — رُفضت الصفقة"
 
     prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, second_layer=False)
 
@@ -109,19 +109,24 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d):
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 150
             },
-            timeout=10
+            timeout=30 # ✅ مهلة 30 ثانية
         )
         data = res.json()
         if "choices" not in data:
-            return "APPROVE", f"⚠️ Groq: {data.get('error', {}).get('message', 'خطأ غير معروف')}"
+            return "REJECT", f"⚠️ Groq: {data.get('error', {}).get('message', 'خطأ غير معروف')} — رُفضت الصفقة"
 
         text = data["choices"][0]["message"]["content"].strip()
         verdict, advice = _parse_response(text)
         print(f"🤖 Groq → {verdict} | {advice}")
         return verdict, advice
 
+    except requests.exceptions.Timeout:
+        print("⏰ Groq تجاوز مهلة 30 ثانية — رُفضت الصفقة")
+        return "REJECT", "⏰ Groq لم يرد خلال 30 ثانية — رُفضت الصفقة"
+
     except Exception as e:
-        return "APPROVE", f"⚠️ Groq Error: {e}"
+        print(f"❌ Groq Error: {e}")
+        return "REJECT", f"❌ Groq Error: {e} — رُفضت الصفقة"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -129,7 +134,7 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d):
 # ══════════════════════════════════════════════════════════════
 def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d):
     if not OPENROUTER_API_KEY:
-        return "APPROVE", "⚠️ No OpenRouter API Key — تم القبول التلقائي"
+        return "REJECT", "⚠️ No OpenRouter API Key — رُفضت الصفقة"
 
     prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, second_layer=True)
 
@@ -146,20 +151,25 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d):
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 150
             },
-            timeout=15
+            timeout=40 # ✅ مهلة 40 ثانية (أطول لأنه أبطأ)
         )
         data = res.json()
         if "choices" not in data:
             print(f"⚠️ OpenRouter Error: {data}")
-            return "APPROVE", "⚠️ OpenRouter خطأ — تم القبول التلقائي"
+            return "REJECT", "⚠️ OpenRouter خطأ — رُفضت الصفقة"
 
         text = data["choices"][0]["message"]["content"].strip()
         verdict, advice = _parse_response(text)
         print(f"🦙 OpenRouter → {verdict} | {advice}")
         return verdict, advice
 
+    except requests.exceptions.Timeout:
+        print("⏰ OpenRouter تجاوز مهلة 40 ثانية — رُفضت الصفقة")
+        return "REJECT", "⏰ OpenRouter لم يرد خلال 40 ثانية — رُفضت الصفقة"
+
     except Exception as e:
-        return "APPROVE", f"⚠️ OpenRouter Error: {e}"
+        print(f"❌ OpenRouter Error: {e}")
+        return "REJECT", f"❌ OpenRouter Error: {e} — رُفضت الصفقة"
 
 
 # ══════════════════════════════════════════════════════════════
