@@ -156,9 +156,9 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_sta
 
 
 # ══════════════════════════════════════════════════════════════
-# 🧬 الذكاء الثاني: Groq — Qwen3 32B (أذكى)
+# 🦙 الذكاء الثاني: Groq — Llama 3.3 70B (أقوى)
 # ══════════════════════════════════════════════════════════════
-def _review_qwen(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
+def _review_llama70(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
     if not GROQ_API_KEY:
         return "REJECT", "لا يوجد Groq API Key", ""
 
@@ -175,7 +175,7 @@ def _review_qwen(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_sta
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "qwen-qwq-32b", # ✅ Qwen3 32B على Groq
+                    "model": "llama-3.3-70b-versatile", # ✅ Llama 3.3 70B
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 150
                 },
@@ -183,29 +183,29 @@ def _review_qwen(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_sta
             )
 
             if res.status_code == 429:
-                print("⏳ Qwen3: rate limit — انتظار 5 ثواني...")
+                print("⏳ Llama70B: rate limit — انتظار 5 ثواني...")
                 time.sleep(5)
                 continue
 
             data = res.json()
             if "choices" not in data:
-                print(f"⚠️ Qwen3 Error: {data}")
-                return "REJECT", "خطأ في Qwen3", ""
+                print(f"⚠️ Llama70B Error: {data}")
+                return "REJECT", "خطأ في Llama 70B", ""
 
             text = data["choices"][0]["message"]["content"]
             verdict, reason, advice = _parse_response(text)
-            print(f"🧬 Qwen3 → {verdict} | {reason}")
+            print(f"🦙 Llama70B → {verdict} | {reason}")
             return verdict, reason, advice
 
         except requests.exceptions.Timeout:
-            print("⏰ Qwen3 timeout — إعادة المحاولة...")
+            print("⏰ Llama70B timeout — إعادة المحاولة...")
             continue
         except Exception as e:
-            print(f"❌ Qwen3 Error: {e}")
-            return "REJECT", f"خطأ في Qwen3: {e}", ""
+            print(f"❌ Llama70B Error: {e}")
+            return "REJECT", f"خطأ في Llama 70B: {e}", ""
 
-    print("⏰ Qwen3 انتهى وقته — رُفضت الصفقة")
-    return "REJECT", "لم يرد Qwen3 خلال 40 ثانية", ""
+    print("⏰ Llama70B انتهى وقته — رُفضت الصفقة")
+    return "REJECT", "لم يرد Llama 70B خلال 40 ثانية", ""
 
 
 # ══════════════════════════════════════════════════════════════
@@ -214,7 +214,7 @@ def _review_qwen(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_sta
 def review(scores, final_score, direction, price,
            scores_1d=None, scores_4h=None, scores_1h=None, pattern_stats=None):
     """
-    طبقة مزدوجة: Llama 8B وQwen3 32B يشتغلوا بالتوازي على Groq
+    طبقة مزدوجة: Llama 8B وLlama 70B يشتغلوا بالتوازي على Groq
     كلاهم لازم يوافقون — وإلا REJECT
     يرجع: (verdict, ai_advice, groq_reason, or_reason)
     """
@@ -233,27 +233,27 @@ def review(scores, final_score, direction, price,
     def run_groq():
         results["groq"] = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
-    def run_qwen():
-        results["or"] = _review_qwen(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
+    def run_llama70():
+        results["or"] = _review_llama70(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
     # ── تشغيل بالتوازي ✅ ──
     t1 = threading.Thread(target=run_groq)
-    t2 = threading.Thread(target=run_qwen)
+    t2 = threading.Thread(target=run_llama70)
     t1.start()
     t2.start()
     t1.join()
     t2.join()
 
     groq_verdict, groq_reason, _ = results.get("groq", ("REJECT", "خطأ في Groq", ""))
-    or_verdict, or_reason, _ = results.get("or", ("REJECT", "خطأ في Qwen3", ""))
+    or_verdict, or_reason, _ = results.get("or", ("REJECT", "خطأ في Llama 70B", ""))
 
-    print(f"🤖 Groq: {groq_verdict} | 🧬 Qwen3: {or_verdict}")
+    print(f"🤖 Groq: {groq_verdict} | 🦙 Llama70B: {or_verdict}")
 
     if groq_verdict == "REJECT":
         return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, or_reason
 
     if or_verdict == "REJECT":
-        return "REJECT", f"🧬 Qwen3 رفض: {or_reason}", groq_reason, or_reason
+        return "REJECT", f"🦙 Llama رفض: {or_reason}", groq_reason, or_reason
 
-    return "APPROVE", "✅ Groq + Qwen3 وافقا", groq_reason, or_reason
+    return "APPROVE", "✅ Groq + Llama وافقا", groq_reason, or_reason
 
