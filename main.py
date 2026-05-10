@@ -1,3 +1,4 @@
+
 import time
 import uuid
 import traceback
@@ -19,7 +20,7 @@ from strategy_vwap import analyze as vwap_analyze
 from strategy_adx import analyze as adx_analyze
 from strategy_fibonacci import analyze as fib_analyze
 from strategy_news import analyze as news_analyze
-from strategy_memory import analyze as memory_analyze, save_signal
+from strategy_memory import analyze as memory_analyze, save_signal, get_pattern_stats # ✅ جديد
 from strategy_supertrend import analyze as supertrend_analyze
 from strategy_atr import get_levels
 from ai_reviewer import review
@@ -147,13 +148,18 @@ def analyze_symbol(symbol):
         else:
             sl, tp = None, None
 
+        # ── إحصاء الأنماط التاريخية ✅ جديد ──
+        pattern_stats = get_pattern_stats(combined, direction)
+        print(f"📊 النمط التاريخي: {pattern_stats['text']}")
+
         # ── AI Reviewer (Groq + OpenRouter) ──
         confidence = result.get("confidence", 0.5)
         verdict, ai_advice, groq_reason, or_reason = review(
             combined, confidence, direction, price,
             scores_1d=scores_1d,
             scores_4h=scores_4h,
-            scores_1h=scores_1h
+            scores_1h=scores_1h,
+            pattern_stats=pattern_stats # ✅ جديد
         )
 
         if verdict == "APPROVE":
@@ -205,7 +211,8 @@ def main():
             if qualified:
                 best = max(qualified, key=lambda x: x["rank"])
                 signal_id = generate_signal_id()
-                save_signal(signal_id, best["symbol"], best["direction"], best["score"], best["price"])
+                # ✅ نمرر combined عشان يحفظ النمط
+                save_signal(signal_id, best["symbol"], best["direction"], best["score"], best["price"], best["combined"])
                 send_signal(
                     signal_id,
                     best["symbol"],
@@ -213,8 +220,8 @@ def main():
                     best["score"],
                     best["price"],
                     best["ai_advice"],
-                    best["groq_reason"], # ✅ جديد
-                    best["or_reason"], # ✅ جديد
+                    best["groq_reason"],
+                    best["or_reason"],
                     best["combined"],
                     best["sl"],
                     best["tp"]
