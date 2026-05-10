@@ -11,7 +11,7 @@ layer_decision.py
 # ══════════════════════════════════════════════════
 
 # 🟢 طبقة الاتجاه — تحدد LONG/SHORT/NO_TRADE
-TREND_LAYER = {"ema", "supertrend", "adx"}
+TREND_LAYER = {"hma", "alma", "chop"} # ✅ محدث
 
 # 🟡 طبقة الزخم — تؤكد أو تضعف الدخول
 MOMENTUM_LAYER = {"rsi", "macd", "stochastic", "momentum"}
@@ -85,7 +85,7 @@ def _analyze_trend(combined: dict) -> dict:
     elif short_votes > long_votes and confidence >= 0.67:
         direction = "SHORT"
     else:
-        direction = "NO_TRADE" # خلاف بين المؤشرات → لا تداول
+        direction = "NO_TRADE"
 
     return {
         "direction": direction,
@@ -97,18 +97,18 @@ def _analyze_trend(combined: dict) -> dict:
 
 
 def _trend_reason(name: str, score: float, signal: str) -> str:
-    if name == "ema":
-        if signal == "LONG": return "EMA20 فوق EMA50 — اتجاه صاعد"
-        if signal == "SHORT": return "EMA20 تحت EMA50 — اتجاه هابط"
-        return "EMA متقاربة — سوق جانبي"
-    if name == "supertrend":
-        if signal == "LONG": return "Supertrend أخضر — صاعد"
-        if signal == "SHORT": return "Supertrend أحمر — هابط"
-        return "Supertrend محايد"
-    if name == "adx":
-        if score >= 0.62: return f"ADX قوي ({round(score,2)}) — اتجاه واضح صاعد"
-        if score <= 0.38: return f"ADX قوي ({round(score,2)}) — اتجاه واضح هابط"
-        return f"ADX ضعيف ({round(score,2)}) — سوق بدون اتجاه"
+    if name == "hma":
+        if signal == "LONG": return "HMA20 فوق HMA50 — اتجاه صاعد واضح"
+        if signal == "SHORT": return "HMA20 تحت HMA50 — اتجاه هابط واضح"
+        return "HMA متقاربة — سوق جانبي"
+    if name == "alma":
+        if signal == "LONG": return "ALMA صاعد — زخم شرائي قوي"
+        if signal == "SHORT": return "ALMA هابط — زخم بيعي قوي"
+        return "ALMA محايد"
+    if name == "chop":
+        if score >= 0.62: return f"CHOP: ترند قوي صاعد ({round(score,2)})"
+        if score <= 0.38: return f"CHOP: ترند قوي هابط ({round(score,2)})"
+        return f"CHOP: سوق متذبذب — لا ترند واضح ({round(score,2)})"
     return f"score={round(score,2)}"
 
 
@@ -140,7 +140,6 @@ def _analyze_liquidity(combined: dict) -> dict:
         if sig == "NEUTRAL":
             weak_count += 1
 
-    # إذا أغلب مؤشرات السيولة محايدة → حركة وهمية
     if weak_count >= 2:
         status = "BLOCK"
         block_reason = "سيولة ضعيفة — الحركة غير مدعومة بفلوس حقيقية"
@@ -178,7 +177,6 @@ def _liquidity_reason(name: str, score: float, signal: str) -> str:
 def _analyze_momentum(combined: dict, direction: str) -> dict:
     """
     يقيس قوة الحركة في اتجاه Trend Layer
-    يرجع: score زخم بين 0-1 + تفاصيل
     """
     mom_scores = {k: v for k, v in combined.items() if k in MOMENTUM_LAYER}
 
@@ -323,7 +321,7 @@ def _analyze_volatility(combined: dict) -> dict:
 
     return {
         "state": state,
-        "action": action, # ALLOW / WAIT / CAUTION
+        "action": action,
         "score": round(bb_score, 3),
         "reason": reason
     }
@@ -382,13 +380,6 @@ def _ai_reason(name: str, score: float, signal: str) -> str:
 # ══════════════════════════════════════════════════
 
 def layer_decision(combined: dict) -> dict:
-    """
-    النظام الطبقي الكامل
-    ━━━━━━━━━━━━━━━━━━━━━
-    المدخل: combined scores (dict مؤشر → float 0-1)
-    المخرج: قرار كامل مع debug لكل طبقة
-    """
-
     debug = {}
 
     # ── STEP 1: الاتجاه ──────────────────────────
@@ -432,7 +423,6 @@ def layer_decision(combined: dict) -> dict:
     structure = _analyze_structure(combined, direction)
     debug["structure_layer"] = structure
 
-    # إذا كل مؤشرات الهيكل ضد الاتجاه → SKIP
     if structure.get("confirm_ratio", 0) == 0.0 and structure.get("status") != "NEUTRAL":
         return {
             "action": "SKIP",
@@ -465,7 +455,6 @@ def layer_decision(combined: dict) -> dict:
     )
     debug["final_confidence"] = round(confidence_score, 4)
 
-    # ── القرار النهائي ───────────────────────────
     min_confidence = 0.60
 
     if confidence_score < min_confidence:
@@ -476,7 +465,6 @@ def layer_decision(combined: dict) -> dict:
             "debug": debug
         }
 
-    # تحذير AI لكنه لا يمنع الدخول (Groq هو الفلتر الحقيقي)
     ai_warning = ""
     if ai_layer["status"] == "RISK":
         ai_warning = " ⚠️ تحذير AI Layer"
@@ -492,34 +480,15 @@ def layer_decision(combined: dict) -> dict:
 
 
 def _calc_confidence(trend, momentum, structure, liquidity, volatility, ai_layer) -> float:
-    """
-    حساب الثقة النهائية من كل الطبقات
-    الأوزان:
-    - Trend: 40%
-    - Momentum: 30%
-    - Structure: 15%
-    - Liquidity: 10%
-    - AI: 5%
-    """
-    # Trend
     trend_score = trend["confidence"] * 0.40
-
-    # Momentum
     mom_map = {"STRONG": 1.0, "MODERATE": 0.6, "WEAK": 0.2}
     mom_score = mom_map.get(momentum["confirmation"], 0.2) * 0.30
-
-    # Structure
     str_map = {"CONFIRM": 1.0, "WEAK": 0.4, "NEUTRAL": 0.5}
     str_score = str_map.get(structure["status"], 0.5) * 0.15
-
-    # Liquidity
     liq_map = {"PASS": 1.0, "BLOCK": 0.0}
     liq_score = liq_map.get(liquidity["status"], 0.5) * 0.10
-
-    # AI
     ai_map = {"CLEAR": 1.0, "NEUTRAL": 0.7, "RISK": 0.3}
     ai_score = ai_map.get(ai_layer["status"], 0.7) * 0.05
-
     return trend_score + mom_score + str_score + liq_score + ai_score
 
 
@@ -528,7 +497,6 @@ def _calc_confidence(trend, momentum, structure, liquidity, volatility, ai_layer
 # ══════════════════════════════════════════════════
 
 def print_debug(symbol: str, result: dict):
-    """يطبع تقرير مبسط وواضح مع فاصل بين العملات"""
     action = result["action"]
     direction = result["direction"]
     debug = result.get("debug", {})
@@ -537,17 +505,14 @@ def print_debug(symbol: str, result: dict):
     print(f"🪙 {symbol}")
     print(f"{'─'*50}")
 
-    # ── إذا SKIP اطبع السبب وانتهي ──
     if action == "SKIP":
         print(f"⏭️ تخطي — {result['reason']}")
         print(f"{'═'*50}")
         return
 
-    # ── إذا ENTER اطبع التفاصيل ──
     confidence = debug.get("final_confidence", "?")
     print(f"✅ دخول {direction} | ثقة: {confidence}")
 
-    # الاتجاه
     if "trend_layer" in debug:
         t = debug["trend_layer"]
         print(f"\n📈 الاتجاه: {t['direction']} ({int(t['confidence']*100)}% توافق)")
@@ -555,13 +520,11 @@ def print_debug(symbol: str, result: dict):
             icon = "✅" if d["signal"] != "NEUTRAL" else "⚪"
             print(f" {icon} {name}: {d['reason']}")
 
-    # السيولة
     if "liquidity_layer" in debug:
         l = debug["liquidity_layer"]
         icon = "✅" if l["status"] == "PASS" else "🚫"
         print(f"\n💧 السيولة: {icon} {l['reason']}")
 
-    # الزخم
     if "momentum_layer" in debug:
         m = debug["momentum_layer"]
         strength = {"STRONG": "قوي ✅", "MODERATE": "متوسط ⚠️", "WEAK": "ضعيف ❌"}
@@ -570,7 +533,6 @@ def print_debug(symbol: str, result: dict):
             tick = "✅" if d["confirms_trend"] else "❌"
             print(f" {tick} {name}: {d['reason']}")
 
-    # الهيكل
     if "structure_layer" in debug:
         s = debug["structure_layer"]
         icon = "✅" if s["status"] == "CONFIRM" else "⚠️"
@@ -579,7 +541,6 @@ def print_debug(symbol: str, result: dict):
             tick = "✅" if d["confirms_trend"] else "❌"
             print(f" {tick} {name}: {d['reason']}")
 
-    # التقلب
     if "volatility_layer" in debug:
         v = debug["volatility_layer"]
         print(f"\n📊 السوق: {v['reason']}")
