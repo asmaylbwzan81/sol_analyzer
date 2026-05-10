@@ -70,7 +70,7 @@ def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_st
 - ADX > 0.6 = ترند قوي | ADX < 0.4 = ضعيف
 - MACD > 0.5 = زخم صاعد | MACD < 0.5 = هابط
 
-أجب بهذا الشكل بالضبط (3 أسطر):
+يجب أن تجيب بهذا الشكل بالضبط (3 أسطر فقط باللغة العربية):
 VERDICT: APPROVE أو REJECT
 REASON: سبب قصير بالعربي
 ADVICE: نصيحة واحدة بالعربي
@@ -79,6 +79,7 @@ ADVICE: نصيحة واحدة بالعربي
 - APPROVE: 3 إطارات متوافقة والاتجاه واضح والسجل التاريخي إيجابي
 - REJECT: تضارب بين الإطارات أو ADX ضعيف أو السجل التاريخي سلبي
 - كن صارماً — حماية الرصيد أولاً
+- أجب بالعربية فقط
 """
 
 
@@ -156,7 +157,7 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_sta
 
 
 # ══════════════════════════════════════════════════════════════
-# 🦉 الذكاء الثاني: Owl Alpha — من OpenRouter
+# 🐼 الذكاء الثاني: Qwen3 80B — من Alibaba
 # ══════════════════════════════════════════════════════════════
 def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
     if not OPENROUTER_API_KEY:
@@ -176,7 +177,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
                     "HTTP-Referer": "https://github.com/smart_analyzer",
                 },
                 json={
-                    "model": "openrouter/owl-alpha", # ✅ Owl Alpha — مستقر ومجاني
+                    "model": "qwen/qwen3-next-80b-a3b-instruct:free", # ✅ Qwen3 80B مجاني
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 150
                 },
@@ -184,29 +185,29 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
             )
 
             if res.status_code == 429:
-                print("⏳ Owl Alpha: rate limit — انتظار 5 ثواني...")
+                print("⏳ Qwen3: rate limit — انتظار 5 ثواني...")
                 time.sleep(5)
                 continue
 
             data = res.json()
             if "choices" not in data:
-                print(f"⚠️ Owl Alpha Error: {data}")
-                return "REJECT", "خطأ في Owl Alpha", ""
+                print(f"⚠️ Qwen3 Error: {data}")
+                return "REJECT", "خطأ في Qwen3", ""
 
             text = data["choices"][0]["message"]["content"]
             verdict, reason, advice = _parse_response(text)
-            print(f"🦉 Owl Alpha → {verdict} | {reason}")
+            print(f"🐼 Qwen3 → {verdict} | {reason}")
             return verdict, reason, advice
 
         except requests.exceptions.Timeout:
-            print("⏰ Owl Alpha timeout — إعادة المحاولة...")
+            print("⏰ Qwen3 timeout — إعادة المحاولة...")
             continue
         except Exception as e:
-            print(f"❌ Owl Alpha Error: {e}")
-            return "REJECT", f"خطأ في Owl Alpha: {e}", ""
+            print(f"❌ Qwen3 Error: {e}")
+            return "REJECT", f"خطأ في Qwen3: {e}", ""
 
-    print("⏰ Owl Alpha انتهى وقته — رُفضت الصفقة")
-    return "REJECT", "لم يرد Owl Alpha خلال 40 ثانية", ""
+    print("⏰ Qwen3 انتهى وقته — رُفضت الصفقة")
+    return "REJECT", "لم يرد Qwen3 خلال 40 ثانية", ""
 
 
 # ══════════════════════════════════════════════════════════════
@@ -215,7 +216,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
 def review(scores, final_score, direction, price,
            scores_1d=None, scores_4h=None, scores_1h=None, pattern_stats=None):
     """
-    طبقة مزدوجة: Groq وOwl Alpha يشتغلوا بالتوازي
+    طبقة مزدوجة: Groq وQwen3 يشتغلوا بالتوازي
     كلاهم لازم يوافقون — وإلا REJECT
     يرجع: (verdict, ai_advice, groq_reason, or_reason)
     """
@@ -234,27 +235,27 @@ def review(scores, final_score, direction, price,
     def run_groq():
         results["groq"] = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
-    def run_owl():
+    def run_qwen():
         results["or"] = _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
     # ── تشغيل بالتوازي ✅ ──
     t1 = threading.Thread(target=run_groq)
-    t2 = threading.Thread(target=run_owl)
+    t2 = threading.Thread(target=run_qwen)
     t1.start()
     t2.start()
     t1.join()
     t2.join()
 
     groq_verdict, groq_reason, _ = results.get("groq", ("REJECT", "خطأ في Groq", ""))
-    or_verdict, or_reason, _ = results.get("or", ("REJECT", "خطأ في Owl Alpha", ""))
+    or_verdict, or_reason, _ = results.get("or", ("REJECT", "خطأ في Qwen3", ""))
 
-    print(f"🤖 Groq: {groq_verdict} | 🦉 Owl Alpha: {or_verdict}")
+    print(f"🤖 Groq: {groq_verdict} | 🐼 Qwen3: {or_verdict}")
 
     if groq_verdict == "REJECT":
         return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, or_reason
 
     if or_verdict == "REJECT":
-        return "REJECT", f"🦉 Owl Alpha رفض: {or_reason}", groq_reason, or_reason
+        return "REJECT", f"🐼 Qwen3 رفض: {or_reason}", groq_reason, or_reason
 
-    return "APPROVE", "✅ Groq + Owl Alpha وافقا", groq_reason, or_reason
+    return "APPROVE", "✅ Groq + Qwen3 وافقا", groq_reason, or_reason
 
