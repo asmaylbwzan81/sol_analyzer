@@ -1,5 +1,7 @@
 import requests
 import os
+import time
+import threading
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
@@ -34,7 +36,7 @@ def _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h):
 # 📝 بناء الـ Prompt (مشترك بين الاثنين)
 # ══════════════════════════════════════════════════════════════
 def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None, second_layer=False):
-    note = "(هذه المراجعة الثانية — Groq وافق بالفعل، أنت الحكم الأخير)\n" if second_layer else ""
+    note = "(هذه مراجعة متزامنة — أنت والذكاء الثاني يحللان معاً)\n" if second_layer else ""
 
     if pattern_stats and pattern_stats.get("total", 0) > 0:
         history_line = f"📊 السجل التاريخي: {pattern_stats['text']}"
@@ -84,7 +86,7 @@ ADVICE: نصيحة واحدة بالعربي
 # 🔍 تحليل الرد (مشترك)
 # ══════════════════════════════════════════════════════════════
 def _parse_response(text):
-    if not text: # ✅ فحص None أو فاضي
+    if not text:
         return "REJECT", "رد فارغ من الذكاء", ""
     verdict = "APPROVE"
     reason = ""
@@ -109,37 +111,48 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_sta
         return "REJECT", "لا يوجد Groq API Key", ""
 
     prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats, second_layer=False)
+    deadline = time.time() + 30 # ✅ 30 ثانية كحد أقصى
 
-    try:
-        res = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "llama-3.1-8b-instant",
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 150
-            },
-            timeout=30
-        )
-        data = res.json()
-        if "choices" not in data:
-            return "REJECT", f"خطأ: {data.get('error', {}).get('message', 'خطأ غير معروف')}", ""
+    while time.time() < deadline:
+        try:
+            remaining = deadline - time.time()
+            res = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "llama-3.1-8b-instant",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 150
+                },
+                timeout=min(remaining, 10)
+            )
 
-        text = data["choices"][0]["message"]["content"]
-        verdict, reason, advice = _parse_response(text)
-        print(f"🤖 Groq → {verdict} | {reason} | {advice}")
-        return verdict, reason, advice
+            if res.status_code == 429:
+                print("⏳ Groq: rate limit — انتظار 5 ثواني...")
+                time.sleep(5)
+                continue
 
-    except requests.exceptions.Timeout:
-        print("⏰ Groq تجاوز مهلة 30 ثانية — رُفضت الصفقة")
-        return "REJECT", "لم يرد Groq خلال 30 ثانية", ""
+            data = res.json()
+            if "choices" not in data:
+                return "REJECT", f"خطأ: {data.get('error', {}).get('message', 'خطأ غير معروف')}", ""
 
-    except Exception as e:
-        print(f"❌ Groq Error: {e}")
-        return "REJECT", f"خطأ في Groq: {e}", ""
+            text = data["choices"][0]["message"]["content"]
+            verdict, reason, advice = _parse_response(text)
+            print(f"🤖 Groq → {verdict} | {reason}")
+            return verdict, reason, advice
+
+        except requests.exceptions.Timeout:
+            print("⏰ Groq timeout — إعادة المحاولة...")
+            continue
+        except Exception as e:
+            print(f"❌ Groq Error: {e}")
+            return "REJECT", f"خطأ في Groq: {e}", ""
+
+    print("⏰ Groq انتهى وقته — رُفضت الصفقة")
+    return "REJECT", "لم يرد Groq خلال 30 ثانية", ""
 
 
 # ══════════════════════════════════════════════════════════════
@@ -150,48 +163,59 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
         return "REJECT", "لا يوجد OpenRouter API Key", ""
 
     prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats, second_layer=True)
+    deadline = time.time() + 40 # ✅ 40 ثانية كحد أقصى
 
-    try:
-        res = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/smart_analyzer",
-            },
-            json={
-                "model": "meta-llama/llama-3.3-70b-instruct:free", # ✅ موديل ثابت
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 150
-            },
-            timeout=40
-        )
-        data = res.json()
-        if "choices" not in data:
-            print(f"⚠️ OpenRouter Error: {data}")
-            return "REJECT", "خطأ في OpenRouter", ""
+    while time.time() < deadline:
+        try:
+            remaining = deadline - time.time()
+            res = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://github.com/smart_analyzer",
+                },
+                json={
+                    "model": "meta-llama/llama-3.3-70b-instruct:free",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 150
+                },
+                timeout=min(remaining, 15)
+            )
 
-        text = data["choices"][0]["message"]["content"]
-        verdict, reason, advice = _parse_response(text)
-        print(f"🦙 OpenRouter → {verdict} | {reason} | {advice}")
-        return verdict, reason, advice
+            if res.status_code == 429:
+                print("⏳ OpenRouter: rate limit — انتظار 5 ثواني...")
+                time.sleep(5)
+                continue
 
-    except requests.exceptions.Timeout:
-        print("⏰ OpenRouter تجاوز مهلة 40 ثانية — رُفضت الصفقة")
-        return "REJECT", "لم يرد OpenRouter خلال 40 ثانية", ""
+            data = res.json()
+            if "choices" not in data:
+                print(f"⚠️ OpenRouter Error: {data}")
+                return "REJECT", "خطأ في OpenRouter", ""
 
-    except Exception as e:
-        print(f"❌ OpenRouter Error: {e}")
-        return "REJECT", f"خطأ في OpenRouter: {e}", ""
+            text = data["choices"][0]["message"]["content"]
+            verdict, reason, advice = _parse_response(text)
+            print(f"🦙 OpenRouter → {verdict} | {reason}")
+            return verdict, reason, advice
+
+        except requests.exceptions.Timeout:
+            print("⏰ OpenRouter timeout — إعادة المحاولة...")
+            continue
+        except Exception as e:
+            print(f"❌ OpenRouter Error: {e}")
+            return "REJECT", f"خطأ في OpenRouter: {e}", ""
+
+    print("⏰ OpenRouter انتهى وقته — رُفضت الصفقة")
+    return "REJECT", "لم يرد OpenRouter خلال 40 ثانية", ""
 
 
 # ══════════════════════════════════════════════════════════════
-# 🚀 الدالة الرئيسية
+# 🚀 الدالة الرئيسية — بالتوازي ✅
 # ══════════════════════════════════════════════════════════════
 def review(scores, final_score, direction, price,
            scores_1d=None, scores_4h=None, scores_1h=None, pattern_stats=None):
     """
-    طبقة مزدوجة: Groq أولاً ثم OpenRouter
+    طبقة مزدوجة: Groq وOpenRouter يشتغلوا بالتوازي
     كلاهم لازم يوافقون — وإلا REJECT
     يرجع: (verdict, ai_advice, groq_reason, or_reason)
     """
@@ -205,15 +229,35 @@ def review(scores, final_score, direction, price,
 
     tf_1h, tf_4h, tf_1d = _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h)
 
-    groq_verdict, groq_reason, groq_advice = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
+    # ── نتائج الذكاءين ──
+    results = {}
 
+    def run_groq():
+        results["groq"] = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
+
+    def run_openrouter():
+        results["or"] = _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
+
+    # ── تشغيل بالتوازي ✅ ──
+    t1 = threading.Thread(target=run_groq)
+    t2 = threading.Thread(target=run_openrouter)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    groq_verdict, groq_reason, _ = results.get("groq", ("REJECT", "خطأ في Groq", ""))
+    or_verdict, or_reason, _ = results.get("or", ("REJECT", "خطأ في OpenRouter", ""))
+
+    print(f"🤖 Groq: {groq_verdict} | 🦙 OpenRouter: {or_verdict}")
+
+    # ── لو واحد رفض = REJECT ──
     if groq_verdict == "REJECT":
-        return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, ""
-
-    or_verdict, or_reason, or_advice = _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
+        return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, or_reason
 
     if or_verdict == "REJECT":
         return "REJECT", f"🦙 OpenRouter رفض: {or_reason}", groq_reason, or_reason
 
+    # ── كلاهم وافق ✅ ──
     return "APPROVE", "✅ Groq + OpenRouter وافقا", groq_reason, or_reason
 
