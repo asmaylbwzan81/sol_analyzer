@@ -33,13 +33,22 @@ def _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h):
 # ══════════════════════════════════════════════════════════════
 # 📝 بناء الـ Prompt (مشترك بين الاثنين)
 # ══════════════════════════════════════════════════════════════
-def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, second_layer=False):
+def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None, second_layer=False):
     note = "(هذه المراجعة الثانية — Groq وافق بالفعل، أنت الحكم الأخير)\n" if second_layer else ""
+
+    # ── السجل التاريخي ──
+    if pattern_stats and pattern_stats.get("total", 0) > 0:
+        history_line = f"📊 السجل التاريخي: {pattern_stats['text']}"
+    else:
+        history_line = "📊 السجل التاريخي: لا يوجد سجل كافٍ بعد"
+
     return f"""أنت محلل تداول خبير ومتحفظ. مهمتك مراجعة صفقة اجتازت فلاتر صارمة.
 {note}
 السعر: {price}
 الاتجاه: {direction}
 ثقة النظام: {round(final_score * 100)}%
+
+{history_line}
 
 📊 مؤشرات الساعة (1H):
 - RSI: {tf_1h['rsi']} | ADX: {tf_1h['adx']}
@@ -66,8 +75,8 @@ REASON: سبب قصير بالعربي
 ADVICE: نصيحة واحدة بالعربي
 
 قواعد القرار:
-- APPROVE: 3 إطارات متوافقة والاتجاه واضح
-- REJECT: تضارب بين الإطارات أو ADX ضعيف أو خطر عالي
+- APPROVE: 3 إطارات متوافقة والاتجاه واضح والسجل التاريخي إيجابي
+- REJECT: تضارب بين الإطارات أو ADX ضعيف أو السجل التاريخي سلبي
 - كن صارماً — حماية الرصيد أولاً
 """
 
@@ -94,11 +103,11 @@ def _parse_response(text):
 # ══════════════════════════════════════════════════════════════
 # 🤖 الذكاء الأول: Groq (8B — سريع)
 # ══════════════════════════════════════════════════════════════
-def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d):
+def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
     if not GROQ_API_KEY:
         return "REJECT", "لا يوجد Groq API Key", ""
 
-    prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, second_layer=False)
+    prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats, second_layer=False)
 
     try:
         res = requests.post(
@@ -135,11 +144,11 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d):
 # ══════════════════════════════════════════════════════════════
 # 🦙 الذكاء الثاني: OpenRouter
 # ══════════════════════════════════════════════════════════════
-def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d):
+def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
     if not OPENROUTER_API_KEY:
         return "REJECT", "لا يوجد OpenRouter API Key", ""
 
-    prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, second_layer=True)
+    prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats, second_layer=True)
 
     try:
         res = requests.post(
@@ -179,7 +188,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d):
 # 🚀 الدالة الرئيسية
 # ══════════════════════════════════════════════════════════════
 def review(scores, final_score, direction, price,
-           scores_1d=None, scores_4h=None, scores_1h=None):
+           scores_1d=None, scores_4h=None, scores_1h=None, pattern_stats=None):
     """
     طبقة مزدوجة: Groq أولاً ثم OpenRouter
     كلاهم لازم يوافقون — وإلا REJECT
@@ -199,13 +208,13 @@ def review(scores, final_score, direction, price,
     tf_1h, tf_4h, tf_1d = _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h)
 
     # ── الذكاء الأول: Groq ───────────────────
-    groq_verdict, groq_reason, groq_advice = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d)
+    groq_verdict, groq_reason, groq_advice = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
     if groq_verdict == "REJECT":
         return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, ""
 
     # ── الذكاء الثاني: OpenRouter ────────────
-    or_verdict, or_reason, or_advice = _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d)
+    or_verdict, or_reason, or_advice = _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
     if or_verdict == "REJECT":
         return "REJECT", f"🦙 OpenRouter رفض: {or_reason}", groq_reason, or_reason
