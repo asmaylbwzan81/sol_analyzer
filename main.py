@@ -9,7 +9,7 @@ from layer_decision import layer_decision, print_debug
 from strategy_weights import get_all_weights, init_db
 from strategy_rsi import analyze as rsi_analyze
 from strategy_macd import analyze as macd_analyze
-from strategy_ema import analyze as ema_analyze
+from strategy_hma import analyze as hma_analyze # ✅ جديد بدل ema
 from strategy_bollinger import analyze as bollinger_analyze
 from strategy_volume import analyze as volume_analyze
 from strategy_momentum import analyze as momentum_analyze
@@ -17,11 +17,11 @@ from strategy_support_resistance import analyze as sr_analyze
 from strategy_pattern import analyze as pattern_analyze
 from strategy_stochastic import analyze as stochastic_analyze
 from strategy_vwap import analyze as vwap_analyze
-from strategy_adx import analyze as adx_analyze
+from strategy_chop import analyze as chop_analyze # ✅ جديد بدل adx
 from strategy_fibonacci import analyze as fib_analyze
 from strategy_news import analyze as news_analyze
-from strategy_memory import analyze as memory_analyze, save_signal, get_pattern_stats # ✅ جديد
-from strategy_supertrend import analyze as supertrend_analyze
+from strategy_memory import analyze as memory_analyze, save_signal, get_pattern_stats
+from strategy_alma import analyze as alma_analyze # ✅ جديد بدل supertrend
 from strategy_atr import get_levels
 from ai_reviewer import review
 from notifier import send_signal, check_result, send_startup
@@ -62,18 +62,18 @@ def quick_vol_ratio(candles, period=20):
 
 def should_analyze(prices, candles):
     rsi = quick_rsi(prices)
-    adx_score = adx_analyze(candles)
+    chop_score = chop_analyze(candles) # ✅ CHOP بدل ADX
     vol_ratio = quick_vol_ratio(candles)
     reason = []
     if rsi < 35: reason.append(f"RSI oversold {rsi}")
     if rsi > 65: reason.append(f"RSI overbought {rsi}")
-    if adx_score >= 0.65 or adx_score <= 0.35:
-        reason.append(f"ADX إشارة قوية ({adx_score})")
+    if chop_score >= 0.65 or chop_score <= 0.35:
+        reason.append(f"CHOP إشارة قوية ({chop_score})")
     if vol_ratio > 1.5: reason.append(f"Volume spike {vol_ratio}x")
     if reason:
         print(f"✅ فلتر اجتاز: {' | '.join(reason)}")
         return True
-    print(f"⏭️ فلتر: RSI={rsi} ADX={adx_score} Vol={vol_ratio}x — تخطي")
+    print(f"⏭️ فلتر: RSI={rsi} CHOP={chop_score} Vol={vol_ratio}x — تخطي")
     return False
 
 def generate_signal_id():
@@ -86,7 +86,7 @@ def get_scores(symbol, interval):
         scores = {
             "rsi": rsi_analyze(prices),
             "macd": macd_analyze(prices),
-            "ema": ema_analyze(prices),
+            "hma": hma_analyze(prices), # ✅ جديد
             "bollinger": bollinger_analyze(prices),
             "volume": volume_analyze(candles),
             "momentum": momentum_analyze(prices),
@@ -94,11 +94,11 @@ def get_scores(symbol, interval):
             "pattern": pattern_analyze(candles),
             "stochastic": stochastic_analyze(candles),
             "vwap": vwap_analyze(candles),
-            "adx": adx_analyze(candles),
+            "chop": chop_analyze(candles), # ✅ جديد
             "fibonacci": fib_analyze(prices),
             "news": news_analyze(symbol),
             "memory": memory_analyze(symbol),
-            "supertrend": supertrend_analyze(candles),
+            "alma": alma_analyze(candles), # ✅ جديد
         }
         return scores, candles, prices[-1]
     except Exception as e:
@@ -148,18 +148,18 @@ def analyze_symbol(symbol):
         else:
             sl, tp = None, None
 
-        # ── إحصاء الأنماط التاريخية ✅ جديد ──
+        # ── إحصاء الأنماط التاريخية ──
         pattern_stats = get_pattern_stats(combined, direction)
         print(f"📊 النمط التاريخي: {pattern_stats['text']}")
 
-        # ── AI Reviewer (Groq + OpenRouter) ──
+        # ── AI Reviewer ──
         confidence = result.get("confidence", 0.5)
         verdict, ai_advice, groq_reason, or_reason = review(
             combined, confidence, direction, price,
             scores_1d=scores_1d,
             scores_4h=scores_4h,
             scores_1h=scores_1h,
-            pattern_stats=pattern_stats # ✅ جديد
+            pattern_stats=pattern_stats
         )
 
         if verdict == "APPROVE":
@@ -211,7 +211,6 @@ def main():
             if qualified:
                 best = max(qualified, key=lambda x: x["rank"])
                 signal_id = generate_signal_id()
-                # ✅ نمرر combined عشان يحفظ النمط
                 save_signal(signal_id, best["symbol"], best["direction"], best["score"], best["price"], best["combined"])
                 send_signal(
                     signal_id,
