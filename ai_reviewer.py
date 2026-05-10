@@ -156,7 +156,7 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_sta
 
 
 # ══════════════════════════════════════════════════════════════
-# 🐋 الذكاء الثاني: DeepSeek R1 (أقوى)
+# 🦉 الذكاء الثاني: Owl Alpha — من OpenRouter
 # ══════════════════════════════════════════════════════════════
 def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
     if not OPENROUTER_API_KEY:
@@ -176,7 +176,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
                     "HTTP-Referer": "https://github.com/smart_analyzer",
                 },
                 json={
-                    "model": "deepseek/deepseek-r1:free", # ✅ DeepSeek R1 الأصلي
+                    "model": "openrouter/owl-alpha", # ✅ Owl Alpha — مستقر ومجاني
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 150
                 },
@@ -184,29 +184,29 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
             )
 
             if res.status_code == 429:
-                print("⏳ DeepSeek: rate limit — انتظار 5 ثواني...")
+                print("⏳ Owl Alpha: rate limit — انتظار 5 ثواني...")
                 time.sleep(5)
                 continue
 
             data = res.json()
             if "choices" not in data:
-                print(f"⚠️ DeepSeek Error: {data}")
-                return "REJECT", "خطأ في DeepSeek", ""
+                print(f"⚠️ Owl Alpha Error: {data}")
+                return "REJECT", "خطأ في Owl Alpha", ""
 
             text = data["choices"][0]["message"]["content"]
             verdict, reason, advice = _parse_response(text)
-            print(f"🐋 DeepSeek → {verdict} | {reason}")
+            print(f"🦉 Owl Alpha → {verdict} | {reason}")
             return verdict, reason, advice
 
         except requests.exceptions.Timeout:
-            print("⏰ DeepSeek timeout — إعادة المحاولة...")
+            print("⏰ Owl Alpha timeout — إعادة المحاولة...")
             continue
         except Exception as e:
-            print(f"❌ DeepSeek Error: {e}")
-            return "REJECT", f"خطأ في DeepSeek: {e}", ""
+            print(f"❌ Owl Alpha Error: {e}")
+            return "REJECT", f"خطأ في Owl Alpha: {e}", ""
 
-    print("⏰ DeepSeek انتهى وقته — رُفضت الصفقة")
-    return "REJECT", "لم يرد DeepSeek خلال 40 ثانية", ""
+    print("⏰ Owl Alpha انتهى وقته — رُفضت الصفقة")
+    return "REJECT", "لم يرد Owl Alpha خلال 40 ثانية", ""
 
 
 # ══════════════════════════════════════════════════════════════
@@ -215,7 +215,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
 def review(scores, final_score, direction, price,
            scores_1d=None, scores_4h=None, scores_1h=None, pattern_stats=None):
     """
-    طبقة مزدوجة: Groq وDeepSeek R1 يشتغلوا بالتوازي
+    طبقة مزدوجة: Groq وOwl Alpha يشتغلوا بالتوازي
     كلاهم لازم يوافقون — وإلا REJECT
     يرجع: (verdict, ai_advice, groq_reason, or_reason)
     """
@@ -234,27 +234,27 @@ def review(scores, final_score, direction, price,
     def run_groq():
         results["groq"] = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
-    def run_deepseek():
+    def run_owl():
         results["or"] = _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
     # ── تشغيل بالتوازي ✅ ──
     t1 = threading.Thread(target=run_groq)
-    t2 = threading.Thread(target=run_deepseek)
+    t2 = threading.Thread(target=run_owl)
     t1.start()
     t2.start()
     t1.join()
     t2.join()
 
     groq_verdict, groq_reason, _ = results.get("groq", ("REJECT", "خطأ في Groq", ""))
-    or_verdict, or_reason, _ = results.get("or", ("REJECT", "خطأ في DeepSeek", ""))
+    or_verdict, or_reason, _ = results.get("or", ("REJECT", "خطأ في Owl Alpha", ""))
 
-    print(f"🤖 Groq: {groq_verdict} | 🐋 DeepSeek: {or_verdict}")
+    print(f"🤖 Groq: {groq_verdict} | 🦉 Owl Alpha: {or_verdict}")
 
     if groq_verdict == "REJECT":
         return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, or_reason
 
     if or_verdict == "REJECT":
-        return "REJECT", f"🐋 DeepSeek رفض: {or_reason}", groq_reason, or_reason
+        return "REJECT", f"🦉 Owl Alpha رفض: {or_reason}", groq_reason, or_reason
 
-    return "APPROVE", "✅ Groq + DeepSeek وافقا", groq_reason, or_reason
+    return "APPROVE", "✅ Groq + Owl Alpha وافقا", groq_reason, or_reason
 
