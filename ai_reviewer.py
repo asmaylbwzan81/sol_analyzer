@@ -111,7 +111,7 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_sta
         return "REJECT", "لا يوجد Groq API Key", ""
 
     prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats, second_layer=False)
-    deadline = time.time() + 30 # ✅ 30 ثانية كحد أقصى
+    deadline = time.time() + 30
 
     while time.time() < deadline:
         try:
@@ -156,14 +156,14 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_sta
 
 
 # ══════════════════════════════════════════════════════════════
-# 🦙 الذكاء الثاني: OpenRouter — Llama 3.3 70B
+# 🧠 الذكاء الثاني: OpenRouter — DeepSeek R1 (أقوى)
 # ══════════════════════════════════════════════════════════════
 def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
     if not OPENROUTER_API_KEY:
         return "REJECT", "لا يوجد OpenRouter API Key", ""
 
     prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats, second_layer=True)
-    deadline = time.time() + 40 # ✅ 40 ثانية كحد أقصى
+    deadline = time.time() + 40
 
     while time.time() < deadline:
         try:
@@ -176,7 +176,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
                     "HTTP-Referer": "https://github.com/smart_analyzer",
                 },
                 json={
-                    "model": "meta-llama/llama-3.3-70b-instruct:free",
+                    "model": "deepseek/deepseek-r1-0528:free", # ✅ DeepSeek R1 — أقوى وأكثر استقراراً
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 150
                 },
@@ -184,29 +184,29 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
             )
 
             if res.status_code == 429:
-                print("⏳ OpenRouter: rate limit — انتظار 5 ثواني...")
+                print("⏳ DeepSeek: rate limit — انتظار 5 ثواني...")
                 time.sleep(5)
                 continue
 
             data = res.json()
             if "choices" not in data:
-                print(f"⚠️ OpenRouter Error: {data}")
-                return "REJECT", "خطأ في OpenRouter", ""
+                print(f"⚠️ DeepSeek Error: {data}")
+                return "REJECT", "خطأ في DeepSeek", ""
 
             text = data["choices"][0]["message"]["content"]
             verdict, reason, advice = _parse_response(text)
-            print(f"🦙 OpenRouter → {verdict} | {reason}")
+            print(f"🧠 DeepSeek → {verdict} | {reason}")
             return verdict, reason, advice
 
         except requests.exceptions.Timeout:
-            print("⏰ OpenRouter timeout — إعادة المحاولة...")
+            print("⏰ DeepSeek timeout — إعادة المحاولة...")
             continue
         except Exception as e:
-            print(f"❌ OpenRouter Error: {e}")
-            return "REJECT", f"خطأ في OpenRouter: {e}", ""
+            print(f"❌ DeepSeek Error: {e}")
+            return "REJECT", f"خطأ في DeepSeek: {e}", ""
 
-    print("⏰ OpenRouter انتهى وقته — رُفضت الصفقة")
-    return "REJECT", "لم يرد OpenRouter خلال 40 ثانية", ""
+    print("⏰ DeepSeek انتهى وقته — رُفضت الصفقة")
+    return "REJECT", "لم يرد DeepSeek خلال 40 ثانية", ""
 
 
 # ══════════════════════════════════════════════════════════════
@@ -215,7 +215,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
 def review(scores, final_score, direction, price,
            scores_1d=None, scores_4h=None, scores_1h=None, pattern_stats=None):
     """
-    طبقة مزدوجة: Groq وOpenRouter يشتغلوا بالتوازي
+    طبقة مزدوجة: Groq وDeepSeek R1 يشتغلوا بالتوازي
     كلاهم لازم يوافقون — وإلا REJECT
     يرجع: (verdict, ai_advice, groq_reason, or_reason)
     """
@@ -229,35 +229,32 @@ def review(scores, final_score, direction, price,
 
     tf_1h, tf_4h, tf_1d = _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h)
 
-    # ── نتائج الذكاءين ──
     results = {}
 
     def run_groq():
         results["groq"] = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
-    def run_openrouter():
+    def run_deepseek():
         results["or"] = _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
     # ── تشغيل بالتوازي ✅ ──
     t1 = threading.Thread(target=run_groq)
-    t2 = threading.Thread(target=run_openrouter)
+    t2 = threading.Thread(target=run_deepseek)
     t1.start()
     t2.start()
     t1.join()
     t2.join()
 
     groq_verdict, groq_reason, _ = results.get("groq", ("REJECT", "خطأ في Groq", ""))
-    or_verdict, or_reason, _ = results.get("or", ("REJECT", "خطأ في OpenRouter", ""))
+    or_verdict, or_reason, _ = results.get("or", ("REJECT", "خطأ في DeepSeek", ""))
 
-    print(f"🤖 Groq: {groq_verdict} | 🦙 OpenRouter: {or_verdict}")
+    print(f"🤖 Groq: {groq_verdict} | 🧠 DeepSeek: {or_verdict}")
 
-    # ── لو واحد رفض = REJECT ──
     if groq_verdict == "REJECT":
         return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, or_reason
 
     if or_verdict == "REJECT":
-        return "REJECT", f"🦙 OpenRouter رفض: {or_reason}", groq_reason, or_reason
+        return "REJECT", f"🧠 DeepSeek رفض: {or_reason}", groq_reason, or_reason
 
-    # ── كلاهم وافق ✅ ──
-    return "APPROVE", "✅ Groq + OpenRouter وافقا", groq_reason, or_reason
+    return "APPROVE", "✅ Groq + DeepSeek وافقا", groq_reason, or_reason
 
