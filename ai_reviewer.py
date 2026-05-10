@@ -143,7 +143,7 @@ def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_sta
 
 
 # ══════════════════════════════════════════════════════════════
-# 🦙 الذكاء الثاني: OpenRouter
+# 🦙 الذكاء الثاني: OpenRouter — Llama 3.3 70B
 # ══════════════════════════════════════════════════════════════
 def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
     if not OPENROUTER_API_KEY:
@@ -160,7 +160,7 @@ def _review_openrouter(price, direction, final_score, tf_1h, tf_4h, tf_1d, patte
                 "HTTP-Referer": "https://github.com/smart_analyzer",
             },
             json={
-                "model": "openrouter/free",
+                "model": "meta-llama/llama-3.3-70b-instruct:free", # ✅ موديل ثابت
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 150
             },
