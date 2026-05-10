@@ -36,10 +36,14 @@ def _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h):
 def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None, second_layer=False):
     note = "(هذه المراجعة الثانية — Groq وافق بالفعل، أنت الحكم الأخير)\n" if second_layer else ""
 
+    # ── السجل التاريخي ── ✅ معدل
     if pattern_stats and pattern_stats.get("total", 0) > 0:
-        history_line = f"📊 السجل التاريخي: {pattern_stats['text']}"
+        history_line = f"📊 السجل التاريخي: {pattern_stats['text']} — خذه بعين الاعتبار مع التحليل"
+        history_rule = "- إذا كان السجل التاريخي إيجابياً (فوق 60%) = عامل داعم للدخول"
+        history_rule += "\n- إذا كان السجل التاريخي سلبياً (تحت 40%) = عامل ضد الدخول"
     else:
-        history_line = "📊 السجل التاريخي: لا يوجد سجل كافٍ بعد"
+        history_line = "📊 السجل التاريخي: لا يوجد سجل بعد — قرر بناءً على المؤشرات فقط ولا ترفض بسبب غياب التاريخ"
+        history_rule = "- لا يوجد سجل تاريخي — ركز على المؤشرات التقنية فقط"
 
     return f"""أنت محلل تداول خبير ومتحفظ. مهمتك مراجعة صفقة اجتازت فلاتر صارمة.
 {note}
@@ -67,6 +71,7 @@ def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_st
 - EMA > 0.5 = صاعد | EMA < 0.5 = هابط
 - ADX > 0.6 = ترند قوي | ADX < 0.4 = ضعيف
 - MACD > 0.5 = زخم صاعد | MACD < 0.5 = هابط
+{history_rule}
 
 يجب أن تجيب بهذا الشكل بالضبط (3 أسطر فقط باللغة العربية):
 VERDICT: APPROVE أو REJECT
@@ -74,8 +79,8 @@ REASON: سبب قصير بالعربي
 ADVICE: نصيحة واحدة بالعربي
 
 قواعد القرار:
-- APPROVE: 3 إطارات متوافقة والاتجاه واضح والسجل التاريخي إيجابي
-- REJECT: تضارب بين الإطارات أو ADX ضعيف أو السجل التاريخي سلبي
+- APPROVE: 3 إطارات متوافقة والاتجاه واضح
+- REJECT: تضارب بين الإطارات أو ADX ضعيف
 - كن صارماً — حماية الرصيد أولاً
 - أجب بالعربية فقط
 """
@@ -208,13 +213,12 @@ def _review_llama70(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_
 
 
 # ══════════════════════════════════════════════════════════════
-# 🚀 الدالة الرئيسية — تسلسل ✅ (توفير طلبات Llama 70B)
+# 🚀 الدالة الرئيسية — تسلسل ✅
 # ══════════════════════════════════════════════════════════════
 def review(scores, final_score, direction, price,
            scores_1d=None, scores_4h=None, scores_1h=None, pattern_stats=None):
     """
     تسلسل: Groq أولاً ← لو وافق ← Llama 70B
-    لو Groq رفض = ما يوصل Llama 70B = توفير الطلبات
     يرجع: (verdict, ai_advice, groq_reason, or_reason)
     """
 
@@ -234,7 +238,7 @@ def review(scores, final_score, direction, price,
         print(f"🤖 Groq رفض — ما يوصل Llama 70B")
         return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, ""
 
-    # ── الذكاء الثاني: Llama 70B (بس لو Groq وافق) ──
+    # ── الذكاء الثاني: Llama 70B ─────────────
     or_verdict, or_reason, _ = _review_llama70(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
 
     if or_verdict == "REJECT":
