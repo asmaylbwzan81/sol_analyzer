@@ -50,7 +50,7 @@ def get_levels(candles):
 
         # ── فلتر المسافة ──
         pivot_range = r1 - s1
-        if pivot_range < price * 0.005:
+        if pivot_range < price * 0.002:
             print(f"⚠️ Pivot Range ضيق ({round(pivot_range,4)}) — تخطي")
             return None, None, None, None
 
