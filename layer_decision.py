@@ -10,22 +10,11 @@ layer_decision.py
 # 🏗️ تعريف الطبقات
 # ══════════════════════════════════════════════════
 
-# 🟢 طبقة الاتجاه — تحدد LONG/SHORT/NO_TRADE
-TREND_LAYER = {"hma", "alma", "chop"} # ✅ محدث
-
-# 🟡 طبقة الزخم — تؤكد أو تضعف الدخول
+TREND_LAYER = {"hma", "alma", "chop"}
 MOMENTUM_LAYER = {"rsi", "macd", "stochastic", "momentum"}
-
-# 🔵 طبقة السيولة — تتحقق من قوة الحركة
 LIQUIDITY_LAYER = {"volume", "vwap", "atr"}
-
-# 🟣 طبقة الهيكل — تحدد أفضل مناطق الدخول
 STRUCTURE_LAYER = {"fibonacci", "support_resistance", "pattern"}
-
-# 🟠 طبقة التقلب — حالة السوق فقط
 VOLATILITY_LAYER = {"bollinger"}
-
-# 🤖 طبقة الذكاء — فلتر نهائي (news + memory)
 AI_LAYER = {"news", "memory"}
 
 
@@ -63,11 +52,7 @@ def _analyze_trend(combined: dict) -> dict:
     for name, score in trend_scores.items():
         sig = _score_to_signal(score)
         reason = _trend_reason(name, score, sig)
-        details[name] = {
-            "signal": sig,
-            "score": round(score, 3),
-            "reason": reason
-        }
+        details[name] = {"signal": sig, "score": round(score, 3), "reason": reason}
         if sig == "LONG": long_votes += 1
         if sig == "SHORT": short_votes += 1
 
@@ -122,11 +107,7 @@ def _analyze_liquidity(combined: dict) -> dict:
     for name, score in liq_scores.items():
         sig = _score_to_signal(score)
         reason = _liquidity_reason(name, score, sig)
-        details[name] = {
-            "signal": sig,
-            "score": round(score, 3),
-            "reason": reason
-        }
+        details[name] = {"signal": sig, "score": round(score, 3), "reason": reason}
         if sig == "NEUTRAL":
             weak_count += 1
 
@@ -137,12 +118,7 @@ def _analyze_liquidity(combined: dict) -> dict:
         status = "PASS"
         block_reason = "سيولة كافية"
 
-    return {
-        "status": status,
-        "reason": block_reason,
-        "weak_count": weak_count,
-        "details": details
-    }
+    return {"status": status, "reason": block_reason, "weak_count": weak_count, "details": details}
 
 
 def _liquidity_reason(name: str, score: float, signal: str) -> str:
@@ -177,12 +153,7 @@ def _analyze_momentum(combined: dict, direction: str) -> dict:
         sig = _score_to_signal(score)
         confirms = (sig == direction)
         reason = _momentum_reason(name, score, sig)
-        details[name] = {
-            "signal": sig,
-            "score": round(score, 3),
-            "confirms_trend": confirms,
-            "reason": reason
-        }
+        details[name] = {"signal": sig, "score": round(score, 3), "confirms_trend": confirms, "reason": reason}
         if confirms:
             confirm_count += 1
 
@@ -203,8 +174,8 @@ def _analyze_momentum(combined: dict, direction: str) -> dict:
 
 def _momentum_reason(name: str, score: float, signal: str) -> str:
     if name == "rsi":
-        if score <= 0.35: return f"RSI منطقة تشبع بيع — احتمال ارتداد صاعد"
-        if score >= 0.65: return f"RSI منطقة تشبع شراء — احتمال تصحيح"
+        if score <= 0.35: return "RSI منطقة تشبع بيع — احتمال ارتداد صاعد"
+        if score >= 0.65: return "RSI منطقة تشبع شراء — احتمال تصحيح"
         return f"RSI منطقة محايدة ({round(score,2)})"
     if name == "macd":
         if signal == "LONG": return "MACD تقاطع صاعد"
@@ -238,23 +209,14 @@ def _analyze_structure(combined: dict, direction: str) -> dict:
         sig = _score_to_signal(score)
         confirms = (sig == direction)
         reason = _structure_reason(name, score, sig)
-        details[name] = {
-            "signal": sig,
-            "score": round(score, 3),
-            "confirms_trend": confirms,
-            "reason": reason
-        }
+        details[name] = {"signal": sig, "score": round(score, 3), "confirms_trend": confirms, "reason": reason}
         if confirms:
             confirm_count += 1
 
     ratio = confirm_count / len(str_scores)
     status = "CONFIRM" if ratio >= 0.5 else "WEAK"
 
-    return {
-        "status": status,
-        "confirm_ratio": round(ratio, 2),
-        "details": details
-    }
+    return {"status": status, "confirm_ratio": round(ratio, 2), "details": details}
 
 
 def _structure_reason(name: str, score: float, signal: str) -> str:
@@ -263,7 +225,6 @@ def _structure_reason(name: str, score: float, signal: str) -> str:
         if signal == "SHORT": return "السعر عند مستوى Fib مقاومة — فرصة هبوط"
         return "السعر بين مستويات Fibonacci"
     if name == "support_resistance":
-        # ✅ محدث — Pivot Points
         if signal == "LONG": return "السعر عند دعم Pivot — ارتداد صاعد محتمل"
         if signal == "SHORT": return "السعر عند مقاومة Pivot — ارتداد هابط محتمل"
         return "السعر بين مستويات Pivot"
@@ -272,6 +233,68 @@ def _structure_reason(name: str, score: float, signal: str) -> str:
         if signal == "SHORT": return "نمط انعكاسي هابط مكتشف"
         return "لا نمط واضح"
     return f"score={round(score,2)}"
+
+
+# ══════════════════════════════════════════════════
+# 🎯 STEP 4.5: فلتر Pivot Points الحاكم
+# ══════════════════════════════════════════════════
+
+def _check_pivot_filter(combined: dict, direction: str) -> dict:
+    """
+    Pivot Points حاكم — يمنع أو يدعم الدخول بقوة:
+
+    LONG:
+    - score <= 0.30 = عند مقاومة → BLOCK ❌
+    - score >= 0.70 = عند دعم + ارتداد → BOOST ✅
+    - بينهم = محايد → يكمل عادي
+
+    SHORT:
+    - score >= 0.70 = عند دعم قوي → BLOCK ❌
+    - score <= 0.30 = عند مقاومة + ارتداد هابط → BOOST ✅
+    """
+    pivot_score = combined.get("support_resistance", 0.5)
+
+    if direction == "LONG":
+        if pivot_score <= 0.30:
+            return {
+                "action": "BLOCK",
+                "reason": f"🚫 Pivot: السعر عند مقاومة ({round(pivot_score,2)}) — خطر LONG",
+                "boost": 0.0
+            }
+        elif pivot_score >= 0.70:
+            return {
+                "action": "BOOST",
+                "reason": f"✅ Pivot: السعر عند دعم ({round(pivot_score,2)}) — فرصة LONG",
+                "boost": 0.08 # +8% على الثقة
+            }
+        else:
+            return {
+                "action": "NEUTRAL",
+                "reason": f"⚪ Pivot: السعر بين المستويات ({round(pivot_score,2)})",
+                "boost": 0.0
+            }
+
+    elif direction == "SHORT":
+        if pivot_score >= 0.70:
+            return {
+                "action": "BLOCK",
+                "reason": f"🚫 Pivot: السعر عند دعم قوي ({round(pivot_score,2)}) — خطر SHORT",
+                "boost": 0.0
+            }
+        elif pivot_score <= 0.30:
+            return {
+                "action": "BOOST",
+                "reason": f"✅ Pivot: السعر عند مقاومة ({round(pivot_score,2)}) — فرصة SHORT",
+                "boost": 0.08
+            }
+        else:
+            return {
+                "action": "NEUTRAL",
+                "reason": f"⚪ Pivot: السعر بين المستويات ({round(pivot_score,2)})",
+                "boost": 0.0
+            }
+
+    return {"action": "NEUTRAL", "reason": "Pivot محايد", "boost": 0.0}
 
 
 # ══════════════════════════════════════════════════
@@ -285,36 +308,26 @@ def _analyze_volatility(combined: dict) -> dict:
         return {"state": "UNKNOWN", "action": "ALLOW", "reason": "لا بيانات Bollinger"}
 
     if 0.45 <= bb_score <= 0.55:
-        state = "SQUEEZE"
-        action = "WAIT"
+        state = "SQUEEZE"; action = "WAIT"
         reason = "Bollinger ضيق — سوق هادئ، انتظر كسر"
     elif bb_score >= 0.75 or bb_score <= 0.25:
-        state = "EXPANSION"
-        action = "ALLOW"
+        state = "EXPANSION"; action = "ALLOW"
         reason = "Bollinger موسع — بداية حركة قوية"
     elif bb_score >= 0.68:
-        state = "OVERBOUGHT"
-        action = "CAUTION"
+        state = "OVERBOUGHT"; action = "CAUTION"
         reason = "Bollinger منطقة تشبع شراء — احذر من LONG"
     elif bb_score <= 0.32:
-        state = "OVERSOLD"
-        action = "CAUTION"
+        state = "OVERSOLD"; action = "CAUTION"
         reason = "Bollinger منطقة تشبع بيع — احذر من SHORT"
     else:
-        state = "MID_RANGE"
-        action = "ALLOW"
+        state = "MID_RANGE"; action = "ALLOW"
         reason = "Bollinger منطقة وسط — حركة عادية"
 
-    return {
-        "state": state,
-        "action": action,
-        "score": round(bb_score, 3),
-        "reason": reason
-    }
+    return {"state": state, "action": action, "score": round(bb_score, 3), "reason": reason}
 
 
 # ══════════════════════════════════════════════════
-# 🤖 STEP 6: طبقة الذكاء (News + Memory)
+# 🤖 STEP 6: طبقة الذكاء
 # ══════════════════════════════════════════════════
 
 def _analyze_ai_layer(combined: dict, direction: str) -> dict:
@@ -330,22 +343,12 @@ def _analyze_ai_layer(combined: dict, direction: str) -> dict:
         sig = _score_to_signal(score)
         against = (sig != direction and sig != "NEUTRAL")
         reason = _ai_reason(name, score, sig)
-        details[name] = {
-            "signal": sig,
-            "score": round(score, 3),
-            "against_trend": against,
-            "reason": reason
-        }
+        details[name] = {"signal": sig, "score": round(score, 3), "against_trend": against, "reason": reason}
         if against:
             risk_count += 1
 
     status = "RISK" if risk_count >= 1 else "CLEAR"
-
-    return {
-        "status": status,
-        "risk_count": risk_count,
-        "details": details
-    }
+    return {"status": status, "risk_count": risk_count, "details": details}
 
 
 def _ai_reason(name: str, score: float, signal: str) -> str:
@@ -367,6 +370,7 @@ def _ai_reason(name: str, score: float, signal: str) -> str:
 def layer_decision(combined: dict) -> dict:
     debug = {}
 
+    # ── STEP 1: الاتجاه ──
     trend = _analyze_trend(combined)
     debug["trend_layer"] = trend
     direction = trend["direction"]
@@ -379,6 +383,7 @@ def layer_decision(combined: dict) -> dict:
             "debug": debug
         }
 
+    # ── STEP 2: السيولة ──
     liquidity = _analyze_liquidity(combined)
     debug["liquidity_layer"] = liquidity
 
@@ -390,6 +395,7 @@ def layer_decision(combined: dict) -> dict:
             "debug": debug
         }
 
+    # ── STEP 3: الزخم ──
     momentum = _analyze_momentum(combined, direction)
     debug["momentum_layer"] = momentum
 
@@ -401,6 +407,7 @@ def layer_decision(combined: dict) -> dict:
             "debug": debug
         }
 
+    # ── STEP 4: الهيكل ──
     structure = _analyze_structure(combined, direction)
     debug["structure_layer"] = structure
 
@@ -414,6 +421,19 @@ def layer_decision(combined: dict) -> dict:
 
     structure_ok = (structure["status"] == "CONFIRM")
 
+    # ── STEP 4.5: فلتر Pivot الحاكم ──
+    pivot_filter = _check_pivot_filter(combined, direction)
+    debug["pivot_filter"] = pivot_filter
+
+    if pivot_filter["action"] == "BLOCK":
+        return {
+            "action": "SKIP",
+            "direction": direction,
+            "reason": f"❌ Pivot Filter: {pivot_filter['reason']}",
+            "debug": debug
+        }
+
+    # ── STEP 5: التقلب ──
     volatility = _analyze_volatility(combined)
     debug["volatility_layer"] = volatility
 
@@ -425,12 +445,20 @@ def layer_decision(combined: dict) -> dict:
             "debug": debug
         }
 
+    # ── STEP 6: الذكاء ──
     ai_layer = _analyze_ai_layer(combined, direction)
     debug["ai_layer"] = ai_layer
 
+    # ── حساب الثقة النهائية ──
     confidence_score = _calc_confidence(
         trend, momentum, structure, liquidity, volatility, ai_layer
     )
+
+    # ── Pivot Boost ──
+    if pivot_filter["action"] == "BOOST":
+        confidence_score = min(1.0, confidence_score + pivot_filter["boost"])
+        print(f"🎯 Pivot Boost: +{pivot_filter['boost']} → confidence={round(confidence_score,4)}")
+
     debug["final_confidence"] = round(confidence_score, 4)
 
     min_confidence = 0.60
@@ -447,11 +475,13 @@ def layer_decision(combined: dict) -> dict:
     if ai_layer["status"] == "RISK":
         ai_warning = " ⚠️ تحذير AI Layer"
 
+    pivot_note = f" | {pivot_filter['reason']}" if pivot_filter["action"] != "NEUTRAL" else ""
+
     return {
         "action": "ENTER",
         "direction": direction,
         "confidence": round(confidence_score, 4),
-        "reason": f"✅ كل الطبقات اجتازت | {direction} | confidence={round(confidence_score,2)}{ai_warning}",
+        "reason": f"✅ كل الطبقات اجتازت | {direction} | confidence={round(confidence_score,2)}{ai_warning}{pivot_note}",
         "structure_confirmed": structure_ok,
         "debug": debug
     }
@@ -459,27 +489,22 @@ def layer_decision(combined: dict) -> dict:
 
 def _calc_confidence(trend, momentum, structure, liquidity, volatility, ai_layer) -> float:
     """
-    الأوزان المحدثة:
+    الأوزان:
     - Trend: 40%
-    - Momentum: 25% ✅ نقص من 30%
-    - Structure/Pivot: 20% ✅ زاد من 15%
+    - Momentum: 25%
+    - Structure/Pivot: 20%
     - Liquidity: 10%
     - AI: 5%
     """
     trend_score = trend["confidence"] * 0.40
-
     mom_map = {"STRONG": 1.0, "MODERATE": 0.6, "WEAK": 0.2}
-    mom_score = mom_map.get(momentum["confirmation"], 0.2) * 0.25 # ✅ 25%
-
+    mom_score = mom_map.get(momentum["confirmation"], 0.2) * 0.25
     str_map = {"CONFIRM": 1.0, "WEAK": 0.4, "NEUTRAL": 0.5}
-    str_score = str_map.get(structure["status"], 0.5) * 0.20 # ✅ 20%
-
+    str_score = str_map.get(structure["status"], 0.5) * 0.20
     liq_map = {"PASS": 1.0, "BLOCK": 0.0}
     liq_score = liq_map.get(liquidity["status"], 0.5) * 0.10
-
     ai_map = {"CLEAR": 1.0, "NEUTRAL": 0.7, "RISK": 0.3}
     ai_score = ai_map.get(ai_layer["status"], 0.7) * 0.05
-
     return trend_score + mom_score + str_score + liq_score + ai_score
 
 
@@ -531,6 +556,10 @@ def print_debug(symbol: str, result: dict):
         for name, d in s.get("details", {}).items():
             tick = "✅" if d["confirms_trend"] else "❌"
             print(f" {tick} {name}: {d['reason']}")
+
+    if "pivot_filter" in debug:
+        p = debug["pivot_filter"]
+        print(f"\n🎯 Pivot: {p['reason']}")
 
     if "volatility_layer" in debug:
         v = debug["volatility_layer"]
