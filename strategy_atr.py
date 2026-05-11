@@ -1,4 +1,4 @@
-from strategy_support_resistance import calculate_pivot, get_pivot_levels
+from strategy_support_resistance import calculate_pivot
 
 
 def calculate_atr(candles, period=14):
@@ -18,15 +18,15 @@ def calculate_atr(candles, period=14):
 
 def get_levels(candles):
     """
-    يحدد SL وTP بناءً على Pivot Points + ATR
+    يحدد SL وTP بناءً على Pivot Points
 
     LONG:
-    - SL = تحت S1 (دعم قوي صعب ينكسر)
-    - TP = قبل R1 بهامش صغير
+    - SL = تحت S1 بهامش ATR * 0.3
+    - TP = قبل R1 بهامش ATR * 0.3 (أي TP < R1)
 
     SHORT:
-    - SL = فوق R1 (مقاومة قوية صعبة تكسر)
-    - TP = فوق S1 بهامش صغير
+    - SL = فوق R1 بهامش ATR * 0.3
+    - TP = فوق S1 بهامش ATR * 0.3 (أي TP > S1)
     """
     atr = calculate_atr(candles)
     if not atr:
@@ -44,33 +44,46 @@ def get_levels(candles):
         s1 = pivot["s1"]
         s2 = pivot["s2"]
 
-        margin = atr * 0.3 # هامش أمان = 30% من ATR
+        # هامش = ATR * 0.3 لكن لا يقل عن 0.1% من السعر
+        margin = max(atr * 0.3, price * 0.001)
 
         # ── LONG ──
-        # SL تحت S1 — لو S1 بعيد جداً نستخدم ATR كحد أقصى
-        sl_long_pivot = s1 - margin
-        sl_long_atr = price - atr * 1.5
-        sl_long = max(sl_long_pivot, sl_long_atr) # الأقرب للسعر
+        # SL تحت S1
+        sl_long = s1 - margin
 
-        # TP قبل R1 — لو R1 قريب جداً نستخدم ATR كحد أدنى
-        tp_long_pivot = r1 - margin
-        tp_long_atr = price + atr * 1.0
-        tp_long = max(tp_long_pivot, tp_long_atr) # الأبعد
+        # TP قبل R1 — يعني TP أصغر من R1
+        tp_long = r1 - margin
+
+        # تحقق: لو TP أصغر من السعر الحالي نستخدم ATR
+        if tp_long <= price:
+            tp_long = price + atr * 1.5
+            print(f"⚠️ TP Pivot أصغر من السعر — استخدام ATR: {round(tp_long,4)}")
+
+        # تحقق: لو SL أكبر من السعر الحالي نستخدم ATR
+        if sl_long >= price:
+            sl_long = price - atr * 1.0
+            print(f"⚠️ SL Pivot أكبر من السعر — استخدام ATR: {round(sl_long,4)}")
 
         # ── SHORT ──
         # SL فوق R1
-        sl_short_pivot = r1 + margin
-        sl_short_atr = price + atr * 1.5
-        sl_short = min(sl_short_pivot, sl_short_atr) # الأقرب للسعر
+        sl_short = r1 + margin
 
-        # TP فوق S1
-        tp_short_pivot = s1 + margin
-        tp_short_atr = price - atr * 1.0
-        tp_short = min(tp_short_pivot, tp_short_atr) # الأبعد
+        # TP فوق S1 — يعني TP أكبر من S1
+        tp_short = s1 + margin
+
+        # تحقق: لو TP أكبر من السعر الحالي نستخدم ATR
+        if tp_short >= price:
+            tp_short = price - atr * 1.5
+            print(f"⚠️ TP Short Pivot أكبر من السعر — استخدام ATR: {round(tp_short,4)}")
+
+        # تحقق: لو SL أصغر من السعر الحالي نستخدم ATR
+        if sl_short <= price:
+            sl_short = price + atr * 1.0
+            print(f"⚠️ SL Short Pivot أصغر من السعر — استخدام ATR: {round(sl_short,4)}")
 
         print(f"📍 Pivot: PP={pivot['pp']} | R1={r1} | S1={s1}")
-        print(f"📍 LONG → SL={round(sl_long,4)} | TP={round(tp_long,4)}")
-        print(f"📍 SHORT → SL={round(sl_short,4)} | TP={round(tp_short,4)}")
+        print(f"📍 LONG → SL={round(sl_long,4)} | TP={round(tp_long,4)} (R1={r1})")
+        print(f"📍 SHORT → SL={round(sl_short,4)} | TP={round(tp_short,4)} (S1={s1})")
 
     else:
         # Fallback لـ ATR لو ما في Pivot
