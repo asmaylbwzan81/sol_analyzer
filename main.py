@@ -8,7 +8,7 @@ from layer_decision import layer_decision, print_debug
 from strategy_weights import get_all_weights, init_db
 from strategy_rsi import analyze as rsi_analyze
 from strategy_macd import analyze as macd_analyze
-from strategy_hma import analyze as hma_analyze # ✅ جديد بدل ema
+from strategy_hma import analyze as hma_analyze
 from strategy_bollinger import analyze as bollinger_analyze
 from strategy_volume import analyze as volume_analyze
 from strategy_momentum import analyze as momentum_analyze
@@ -16,11 +16,11 @@ from strategy_support_resistance import analyze as sr_analyze
 from strategy_pattern import analyze as pattern_analyze
 from strategy_stochastic import analyze as stochastic_analyze
 from strategy_vwap import analyze as vwap_analyze
-from strategy_chop import analyze as chop_analyze # ✅ جديد بدل adx
+from strategy_chop import analyze as chop_analyze
 from strategy_fibonacci import analyze as fib_analyze
 from strategy_news import analyze as news_analyze
 from strategy_memory import analyze as memory_analyze, save_signal, get_pattern_stats
-from strategy_alma import analyze as alma_analyze # ✅ جديد بدل supertrend
+from strategy_alma import analyze as alma_analyze
 from strategy_atr import get_levels
 from ai_reviewer import review
 from notifier import send_signal, check_result, send_startup
@@ -32,7 +32,7 @@ SYMBOLS = [
     "OP", "INJ", "SUI", "TIA"
 ]
 
-SLEEP = 1200 # 20 دقيقة
+SLEEP = 1200
 MIN_RANK = 0.70
 
 def quick_rsi(prices, period=14):
@@ -89,7 +89,7 @@ def get_scores(symbol, interval):
             "bollinger": bollinger_analyze(prices),
             "volume": volume_analyze(candles),
             "momentum": momentum_analyze(prices),
-            "support_resistance": sr_analyze(prices, candles), # ✅ يمرر candles
+            "support_resistance": sr_analyze(prices, candles),
             "pattern": pattern_analyze(candles),
             "stochastic": stochastic_analyze(candles),
             "vwap": vwap_analyze(candles),
@@ -115,11 +115,9 @@ def analyze_symbol(symbol):
         if not scores_1h or not scores_4h or not scores_1d:
             return None
 
-        # ── فلتر سريع ──
         if not should_analyze(prices_1h, candles_1h):
             return None
 
-        # ── دمج الإطارات الزمنية ──
         combined = {}
         for key in scores_1h:
             combined[key] = (
@@ -128,7 +126,6 @@ def analyze_symbol(symbol):
                 scores_1h[key] * 0.2
             )
 
-        # ══ النظام الطبقي الجديد ══
         result = layer_decision(combined)
         print_debug(symbol, result)
 
@@ -140,6 +137,7 @@ def analyze_symbol(symbol):
 
         # ── مستويات SL/TP ──
         sl_long, sl_short, tp_long, tp_short = get_levels(candles_1h)
+
         if direction == "LONG":
             sl, tp = sl_long, tp_long
         elif direction == "SHORT":
@@ -147,11 +145,14 @@ def analyze_symbol(symbol):
         else:
             sl, tp = None, None
 
-        # ── إحصاء الأنماط التاريخية ──
+        # ✅ تحقق إن SL وTP موجودين قبل الإرسال
+        if sl is None or tp is None:
+            print(f"⚠️ {symbol} — SL أو TP = None (Pivot Range ضيق) — تخطي")
+            return None
+
         pattern_stats = get_pattern_stats(combined, direction)
         print(f"📊 النمط التاريخي: {pattern_stats['text']}")
 
-        # ── AI Reviewer ──
         confidence = result.get("confidence", 0.5)
         verdict, ai_advice, groq_reason, or_reason = review(
             combined, confidence, direction, price,
