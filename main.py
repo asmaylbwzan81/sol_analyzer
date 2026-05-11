@@ -61,7 +61,7 @@ def quick_vol_ratio(candles, period=20):
 
 def should_analyze(prices, candles):
     rsi = quick_rsi(prices)
-    chop_score = chop_analyze(candles) # ✅ CHOP بدل ADX
+    chop_score = chop_analyze(candles)
     vol_ratio = quick_vol_ratio(candles)
     reason = []
     if rsi < 35: reason.append(f"RSI oversold {rsi}")
@@ -85,19 +85,19 @@ def get_scores(symbol, interval):
         scores = {
             "rsi": rsi_analyze(prices),
             "macd": macd_analyze(prices),
-            "hma": hma_analyze(prices), # ✅ جديد
+            "hma": hma_analyze(prices),
             "bollinger": bollinger_analyze(prices),
             "volume": volume_analyze(candles),
             "momentum": momentum_analyze(prices),
-            "support_resistance": sr_analyze(prices),
+            "support_resistance": sr_analyze(prices, candles), # ✅ يمرر candles
             "pattern": pattern_analyze(candles),
             "stochastic": stochastic_analyze(candles),
             "vwap": vwap_analyze(candles),
-            "chop": chop_analyze(candles), # ✅ جديد
+            "chop": chop_analyze(candles),
             "fibonacci": fib_analyze(prices),
             "news": news_analyze(symbol),
             "memory": memory_analyze(symbol),
-            "alma": alma_analyze(candles), # ✅ جديد
+            "alma": alma_analyze(candles),
         }
         return scores, candles, prices[-1]
     except Exception as e:
