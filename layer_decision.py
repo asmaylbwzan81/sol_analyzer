@@ -30,7 +30,6 @@ AI_LAYER = {"news", "memory"}
 
 
 def _classify(name: str) -> str:
-    """يرجع اسم الطبقة لأي مؤشر"""
     n = name.lower()
     if n in TREND_LAYER: return "trend"
     if n in MOMENTUM_LAYER: return "momentum"
@@ -42,7 +41,6 @@ def _classify(name: str) -> str:
 
 
 def _score_to_signal(score: float) -> str:
-    """تحويل رقم (0-1) إلى إشارة نصية"""
     if score >= 0.62: return "LONG"
     if score <= 0.38: return "SHORT"
     return "NEUTRAL"
@@ -53,10 +51,6 @@ def _score_to_signal(score: float) -> str:
 # ══════════════════════════════════════════════════
 
 def _analyze_trend(combined: dict) -> dict:
-    """
-    يحلل مؤشرات الاتجاه ويقرر:
-    LONG / SHORT / NO_TRADE
-    """
     trend_scores = {k: v for k, v in combined.items() if k in TREND_LAYER}
 
     if not trend_scores:
@@ -117,10 +111,6 @@ def _trend_reason(name: str, score: float, signal: str) -> str:
 # ══════════════════════════════════════════════════
 
 def _analyze_liquidity(combined: dict) -> dict:
-    """
-    يتحقق: هل الحركة حقيقية أو وهمية؟
-    يرجع: PASS / BLOCK
-    """
     liq_scores = {k: v for k, v in combined.items() if k in LIQUIDITY_LAYER}
 
     if not liq_scores:
@@ -175,9 +165,6 @@ def _liquidity_reason(name: str, score: float, signal: str) -> str:
 # ══════════════════════════════════════════════════
 
 def _analyze_momentum(combined: dict, direction: str) -> dict:
-    """
-    يقيس قوة الحركة في اتجاه Trend Layer
-    """
     mom_scores = {k: v for k, v in combined.items() if k in MOMENTUM_LAYER}
 
     if not mom_scores:
@@ -239,7 +226,6 @@ def _momentum_reason(name: str, score: float, signal: str) -> str:
 # ══════════════════════════════════════════════════
 
 def _analyze_structure(combined: dict, direction: str) -> dict:
-    """يحدد هل الدخول في منطقة جيدة هيكلياً"""
     str_scores = {k: v for k, v in combined.items() if k in STRUCTURE_LAYER}
 
     if not str_scores:
@@ -277,9 +263,10 @@ def _structure_reason(name: str, score: float, signal: str) -> str:
         if signal == "SHORT": return "السعر عند مستوى Fib مقاومة — فرصة هبوط"
         return "السعر بين مستويات Fibonacci"
     if name == "support_resistance":
-        if signal == "LONG": return "السعر عند منطقة دعم قوية"
-        if signal == "SHORT": return "السعر عند منطقة مقاومة قوية"
-        return "السعر في منطقة وسط"
+        # ✅ محدث — Pivot Points
+        if signal == "LONG": return "السعر عند دعم Pivot — ارتداد صاعد محتمل"
+        if signal == "SHORT": return "السعر عند مقاومة Pivot — ارتداد هابط محتمل"
+        return "السعر بين مستويات Pivot"
     if name == "pattern":
         if signal == "LONG": return "نمط انعكاسي صاعد مكتشف"
         if signal == "SHORT": return "نمط انعكاسي هابط مكتشف"
@@ -292,7 +279,6 @@ def _structure_reason(name: str, score: float, signal: str) -> str:
 # ══════════════════════════════════════════════════
 
 def _analyze_volatility(combined: dict) -> dict:
-    """يحدد حالة السوق — لا يعطي اتجاه"""
     bb_score = combined.get("bollinger")
 
     if bb_score is None:
@@ -332,7 +318,6 @@ def _analyze_volatility(combined: dict) -> dict:
 # ══════════════════════════════════════════════════
 
 def _analyze_ai_layer(combined: dict, direction: str) -> dict:
-    """يحلل الأخبار والذاكرة كفلتر أخير"""
     ai_scores = {k: v for k, v in combined.items() if k in AI_LAYER}
 
     if not ai_scores:
@@ -382,7 +367,6 @@ def _ai_reason(name: str, score: float, signal: str) -> str:
 def layer_decision(combined: dict) -> dict:
     debug = {}
 
-    # ── STEP 1: الاتجاه ──────────────────────────
     trend = _analyze_trend(combined)
     debug["trend_layer"] = trend
     direction = trend["direction"]
@@ -395,7 +379,6 @@ def layer_decision(combined: dict) -> dict:
             "debug": debug
         }
 
-    # ── STEP 2: السيولة ──────────────────────────
     liquidity = _analyze_liquidity(combined)
     debug["liquidity_layer"] = liquidity
 
@@ -407,7 +390,6 @@ def layer_decision(combined: dict) -> dict:
             "debug": debug
         }
 
-    # ── STEP 3: الزخم ────────────────────────────
     momentum = _analyze_momentum(combined, direction)
     debug["momentum_layer"] = momentum
 
@@ -419,7 +401,6 @@ def layer_decision(combined: dict) -> dict:
             "debug": debug
         }
 
-    # ── STEP 4: الهيكل ───────────────────────────
     structure = _analyze_structure(combined, direction)
     debug["structure_layer"] = structure
 
@@ -433,7 +414,6 @@ def layer_decision(combined: dict) -> dict:
 
     structure_ok = (structure["status"] == "CONFIRM")
 
-    # ── STEP 5: التقلب ───────────────────────────
     volatility = _analyze_volatility(combined)
     debug["volatility_layer"] = volatility
 
@@ -445,11 +425,9 @@ def layer_decision(combined: dict) -> dict:
             "debug": debug
         }
 
-    # ── STEP 6: طبقة الذكاء ──────────────────────
     ai_layer = _analyze_ai_layer(combined, direction)
     debug["ai_layer"] = ai_layer
 
-    # ── حساب الثقة النهائية ──────────────────────
     confidence_score = _calc_confidence(
         trend, momentum, structure, liquidity, volatility, ai_layer
     )
@@ -480,15 +458,28 @@ def layer_decision(combined: dict) -> dict:
 
 
 def _calc_confidence(trend, momentum, structure, liquidity, volatility, ai_layer) -> float:
+    """
+    الأوزان المحدثة:
+    - Trend: 40%
+    - Momentum: 25% ✅ نقص من 30%
+    - Structure/Pivot: 20% ✅ زاد من 15%
+    - Liquidity: 10%
+    - AI: 5%
+    """
     trend_score = trend["confidence"] * 0.40
+
     mom_map = {"STRONG": 1.0, "MODERATE": 0.6, "WEAK": 0.2}
-    mom_score = mom_map.get(momentum["confirmation"], 0.2) * 0.30
+    mom_score = mom_map.get(momentum["confirmation"], 0.2) * 0.25 # ✅ 25%
+
     str_map = {"CONFIRM": 1.0, "WEAK": 0.4, "NEUTRAL": 0.5}
-    str_score = str_map.get(structure["status"], 0.5) * 0.15
+    str_score = str_map.get(structure["status"], 0.5) * 0.20 # ✅ 20%
+
     liq_map = {"PASS": 1.0, "BLOCK": 0.0}
     liq_score = liq_map.get(liquidity["status"], 0.5) * 0.10
+
     ai_map = {"CLEAR": 1.0, "NEUTRAL": 0.7, "RISK": 0.3}
     ai_score = ai_map.get(ai_layer["status"], 0.7) * 0.05
+
     return trend_score + mom_score + str_score + liq_score + ai_score
 
 
