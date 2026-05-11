@@ -1,5 +1,3 @@
-أنا
-
 from strategy_support_resistance import calculate_pivot, get_pivot_levels
 
 
