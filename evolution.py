@@ -1,7 +1,9 @@
 import random
+import json
 import numpy as np
 from strategy_generator import generate_strategy, generate_population, FEATURES, RANGES, OPERATORS
 from backtester import run_backtest
+from redis_store import save_best, load_best
 
 # ══════════════════════════════
 # إعدادات
@@ -9,7 +11,6 @@ from backtester import run_backtest
 POPULATION_SIZE = 300
 GENERATIONS = 50
 TOP_KEEP = 30
-MUTATION_RATE = 0.3
 
 # ══════════════════════════════
 # Mutation
@@ -29,10 +30,8 @@ def mutate(strategy):
         cond["threshold"] = round(
             max(low, min(high, current + random.uniform(-delta, delta))), 6
         )
-
     elif change == "operator":
         cond["operator"] = ">" if cond["operator"] == "<" else "<"
-
     elif change == "feature":
         new_feature = random.choice(FEATURES)
         low, high = RANGES[new_feature]
@@ -46,9 +45,7 @@ def mutate(strategy):
 # Crossover
 # ══════════════════════════════
 def crossover(s1, s2):
-    conds1 = s1["conditions"]
-    conds2 = s2["conditions"]
-    combined = conds1 + conds2
+    combined = s1["conditions"] + s2["conditions"]
     random.shuffle(combined)
     num = random.choice([2, 3])
     return {
@@ -75,7 +72,17 @@ def evolve(df, generations=GENERATIONS):
     print(f"🧬 بدء التطور — {generations} جيل")
     print("━" * 40)
 
-    population = generate_population(POPULATION_SIZE)
+    # تحميل من Redis
+    saved = load_best()
+    if saved:
+        print(f"📂 تحميل استراتيجية محفوظة من Redis...")
+        population = [saved["strategy"]]
+        while len(population) < POPULATION_SIZE:
+            population.append(generate_strategy())
+    else:
+        print("🎲 بدء عشوائي...")
+        population = generate_population(POPULATION_SIZE)
+
     best_ever = None
     best_score = -999
 
@@ -107,22 +114,21 @@ def evolve(df, generations=GENERATIONS):
             best_score = gen_score
             best_ever = best_gen
             print(f" ⭐ أفضل حتى الآن!")
+            # حفظ فوري في Redis
+            save_best(best_ever["strategy"], best_ever["stats"])
 
         # الجيل التالي
         new_population = [r["strategy"] for r in top]
 
-        # Mutation 50%
         while len(new_population) < int(POPULATION_SIZE * 0.5):
             parent = random.choice(top)["strategy"]
             new_population.append(mutate(parent))
 
-        # Crossover 30%
         while len(new_population) < int(POPULATION_SIZE * 0.8):
             p1 = random.choice(top)["strategy"]
             p2 = random.choice(top)["strategy"]
             new_population.append(crossover(p1, p2))
 
-        # عشوائي جديد 20%
         while len(new_population) < POPULATION_SIZE:
             new_population.append(generate_strategy())
 
