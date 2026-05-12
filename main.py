@@ -50,7 +50,7 @@ def main():
             print(f" 📈 Sharpe: {s['sharpe']:.2f}")
             print(f" 🔢 Trades: {s['trades']}")
 
-            # شروط القبول
+            # شروط القبول — يشغل validate فوراً
             if (s['win_rate'] > 0.60 and
                 s['total_profit'] > 0.40 and
                 s['drawdown'] < 0.20):
