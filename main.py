@@ -5,17 +5,12 @@ from features import load_data, extract_features
 from evolution import evolve
 from strategy_generator import print_strategy
 from validator import validate
-from redis_store import clear_best
 
 TARGET = 20000
 
 def main():
     print("🚀 Quant Bot Started")
     print("━" * 40)
-
-    # مسح Redis القديم
-    print("🗑️ مسح Redis...")
-    clear_best()
 
     # 1️⃣ البيانات
     print("📊 فحص قاعدة البيانات...")
