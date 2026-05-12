@@ -54,23 +54,25 @@ def crossover(s1, s2):
     }
 
 # ══════════════════════════════
-# Score
+# Score — يعاقب الصفقات القليلة
 # ══════════════════════════════
 def score_result(r):
     s = r["stats"]
+    trade_bonus = min(s["trades"] / 50, 1.0)
     return (
         s["win_rate"] * 3 +
         s["sharpe"] * 2 +
         s["profit_factor"] -
         s["drawdown"] * 2
-    )
+    ) * trade_bonus
 
 def calc_score(stats):
+    trade_bonus = min(stats.get("trades", 0) / 50, 1.0)
     return (
         stats.get("win_rate", 0) * 3 +
         stats.get("sharpe", 0) * 2 -
         stats.get("drawdown", 1) * 2
-    )
+    ) * trade_bonus
 
 # ══════════════════════════════
 # التطور
@@ -79,7 +81,6 @@ def evolve(df, generations=GENERATIONS):
     print(f"🧬 بدء التطور — {generations} جيل")
     print("━" * 40)
 
-    # تحميل من Redis
     saved = load_best()
     if saved:
         saved_score = calc_score(saved["stats"])
@@ -124,7 +125,6 @@ def evolve(df, generations=GENERATIONS):
             best_ever = best_gen
             print(f" ⭐ أفضل حتى الآن!")
 
-            # حفظ في Redis فقط لو أفضل من المحفوظ
             if gen_score > saved_score:
                 save_best(best_ever["strategy"], best_ever["stats"])
                 saved_score = gen_score
