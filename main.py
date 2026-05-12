@@ -29,27 +29,34 @@ def main():
     df = extract_features(df)
     print(f"✅ {len(df)} صف جاهز")
 
-    # 3️⃣ التطور
-    print("\n🧬 بدء التطور...")
-    best = evolve(df)
+    # 3️⃣ التطور اللانهائي ♾️
+    round_num = 1
+    while True:
+        print(f"\n{'═'*40}")
+        print(f"🔁 الدورة {round_num}")
+        print(f"{'═'*40}")
 
-    # 4️⃣ النتيجة
-    if best:
-        print("\n" + "═" * 40)
-        print("🏆 أفضل استراتيجية:")
-        print_strategy(best["strategy"], 0)
-        s = best["stats"]
-        print(f" 📊 Win Rate: {s['win_rate']*100:.1f}%")
-        print(f" 💰 Total Profit: {s['total_profit']*100:.2f}%")
-        print(f" ⚡ Profit Factor: {s['profit_factor']}")
-        print(f" 📉 Drawdown: {s['drawdown']*100:.1f}%")
-        print(f" 📈 Sharpe: {s['sharpe']:.2f}")
-        print(f" 🔢 Trades: {s['trades']}")
-    else:
-        print("❌ ما لقى استراتيجية — زد عدد الأجيال")
+        best = evolve(df)
 
-    print("\n━" * 40)
-    print("✅ النظام جاهز!")
+        if best:
+            s = best["stats"]
+            print(f"\n🏆 أفضل الدورة {round_num}:")
+            print_strategy(best["strategy"], 0)
+            print(f" 📊 Win Rate: {s['win_rate']*100:.1f}%")
+            print(f" 💰 Total Profit: {s['total_profit']*100:.2f}%")
+            print(f" ⚡ Profit Factor: {s['profit_factor']}")
+            print(f" 📉 Drawdown: {s['drawdown']*100:.1f}%")
+            print(f" 📈 Sharpe: {s['sharpe']:.2f}")
+            print(f" 🔢 Trades: {s['trades']}")
+
+            # شروط القبول
+            if (s['win_rate'] > 0.60 and
+                s['total_profit'] > 0.40 and
+                s['drawdown'] < 0.20):
+                print(f"\n🎯 استراتيجية مقبولة! جاهزة للتنفيذ 🚀")
+
+        round_num += 1
+        time.sleep(5)
 
 if __name__ == "__main__":
     main()
