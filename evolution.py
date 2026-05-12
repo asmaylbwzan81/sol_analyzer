@@ -67,9 +67,9 @@ def score_result(r):
 
 def calc_score(stats):
     return (
-        stats["win_rate"] * 3 +
-        stats["sharpe"] * 2 -
-        stats["drawdown"] * 2
+        stats.get("win_rate", 0) * 3 +
+        stats.get("sharpe", 0) * 2 -
+        stats.get("drawdown", 1) * 2
     )
 
 # ══════════════════════════════
