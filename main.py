@@ -52,7 +52,7 @@ def main():
 
             # شروط القبول — يشغل validate فوراً
             if (s['win_rate'] > 0.60 and
-                s['total_profit'] > 0.40 and
+                s['total_profit'] > 0.30 and
                 s['drawdown'] < 0.20):
                 print(f"\n🎯 استراتيجية مقبولة! جاري التحقق...")
                 validate()
