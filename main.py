@@ -5,12 +5,17 @@ from features import load_data, extract_features
 from evolution import evolve
 from strategy_generator import print_strategy
 from validator import validate
+from redis_store import clear_best
 
 TARGET = 20000
 
 def main():
     print("🚀 Quant Bot Started")
     print("━" * 40)
+
+    # مسح Redis القديم
+    print("🗑️ مسح Redis...")
+    clear_best()
 
     # 1️⃣ البيانات
     print("📊 فحص قاعدة البيانات...")
@@ -50,7 +55,6 @@ def main():
             print(f" 📈 Sharpe: {s['sharpe']:.2f}")
             print(f" 🔢 Trades: {s['trades']}")
 
-            # شروط القبول — يشغل validate فوراً
             if (s['win_rate'] > 0.60 and
                 s['total_profit'] > 0.30 and
                 s['drawdown'] < 0.20):
