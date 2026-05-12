@@ -2,3 +2,4 @@ requests
 pandas
 groq
 upstash-redis
+scipy
