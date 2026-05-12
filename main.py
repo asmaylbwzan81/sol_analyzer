@@ -4,6 +4,7 @@ from data_engine import init_db, fetch_candles, save_candles, count_candles
 from features import load_data, extract_features
 from evolution import evolve
 from strategy_generator import print_strategy
+from validator import validate
 
 TARGET = 20000
 
@@ -53,7 +54,8 @@ def main():
             if (s['win_rate'] > 0.60 and
                 s['total_profit'] > 0.40 and
                 s['drawdown'] < 0.20):
-                print(f"\n🎯 استراتيجية مقبولة! جاهزة للتنفيذ 🚀")
+                print(f"\n🎯 استراتيجية مقبولة! جاري التحقق...")
+                validate()
 
         round_num += 1
         time.sleep(5)
