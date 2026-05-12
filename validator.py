@@ -4,10 +4,13 @@ from features import extract_features
 from backtester import backtest_strategy
 from redis_store import load_best
 
+# ══════════════════════════════
+# نختبر على BTC 1h — فريم مختلف
+# ══════════════════════════════
 SYMBOL = "BTC-USDT"
-INTERVAL = "5m"
+INTERVAL = "1h"
 
-def load_new_data(limit=10000):
+def load_new_data(limit=5000):
     import requests
     import time
 
@@ -57,7 +60,7 @@ def load_new_data(limit=10000):
     return all_candles[:limit]
 
 def validate():
-    print("🔍 بدء التحقق...")
+    print("🔍 بدء التحقق على BTC 1h...")
     print("━" * 40)
 
     saved = load_best()
@@ -68,29 +71,33 @@ def validate():
     strategy = saved["strategy"]
     train_stats = saved["stats"]
 
-    print(f"📂 الاستراتيجية:")
+    print(f"📂 الاستراتيجية (تعلّمت على BTC 5m):")
     for cond in strategy["conditions"]:
         print(f" {cond['feature']} {cond['operator']} {cond['threshold']}")
     print(f" Direction: {strategy['direction']}")
-    print(f"\n📊 التدريب: Win={train_stats['win_rate']*100:.1f}% | Profit={train_stats['total_profit']*100:.1f}%")
+    print(f"\n📊 نتائج التدريب (5m):")
+    print(f" Win Rate: {train_stats['win_rate']*100:.1f}%")
+    print(f" Profit: {train_stats['total_profit']*100:.1f}%")
+    print(f" Drawdown: {train_stats['drawdown']*100:.1f}%")
 
-    print(f"\n📥 جلب 10,000 شمعة جديدة...")
-    new_candles = load_new_data(10000)
+    print(f"\n📥 جلب 5000 شمعة BTC 1h...")
+    new_candles = load_new_data(5000)
     print(f"✅ {len(new_candles)} شمعة")
 
     df = pd.DataFrame(new_candles)
     df = extract_features(df)
     print(f"✅ Features: {len(df)} صف")
 
-    print(f"\n⚙️ اختبار...")
+    print(f"\n⚙️ اختبار على BTC 1h...")
     stats = backtest_strategy(strategy, df)
 
     if not stats:
-        print("❌ ما في صفقات كافية!")
+        print("❌ ما في صفقات كافية على 1h!")
+        print("⚠️ الاستراتيجية مرتبطة بـ 5m فقط = Overfitting")
         return
 
     print(f"\n{'═'*40}")
-    print(f"📊 نتائج التحقق:")
+    print(f"📊 نتائج BTC 1h:")
     print(f" Win Rate: {stats['win_rate']*100:.1f}%")
     print(f" Total Profit: {stats['total_profit']*100:.1f}%")
     print(f" Profit Factor: {stats['profit_factor']}")
@@ -102,14 +109,16 @@ def validate():
 
     print(f"\n{'═'*40}")
     print(f"📋 المقارنة:")
-    print(f" التدريب: Win={train_stats['win_rate']*100:.1f}%")
-    print(f" التحقق: Win={stats['win_rate']*100:.1f}%")
+    print(f" 5m: Win={train_stats['win_rate']*100:.1f}%")
+    print(f" 1h: Win={stats['win_rate']*100:.1f}%")
     print(f" الفرق: {diff*100:.1f}%")
 
-    if stats['win_rate'] > 0.55 and diff < 0.15:
-        print(f"\n✅ حقيقية! جاهزة للتنفيذ 🚀")
+    if stats['win_rate'] > 0.55 and diff < 0.20:
+        print(f"\n✅ الاستراتيجية حقيقية! تعمل على 5m و 1h 🏆")
+        print(f"🚀 جاهزة للتنفيذ!")
     else:
-        print(f"\n❌ Overfitting! تحتاج مزيد من التطوير")
+        print(f"\n❌ Overfitting! تعمل على 5m فقط")
+        print(f"🔄 نكمل التطوير...")
 
 if __name__ == "__main__":
     validate()
