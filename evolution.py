@@ -65,6 +65,13 @@ def score_result(r):
         s["drawdown"] * 2
     )
 
+def calc_score(stats):
+    return (
+        stats["win_rate"] * 3 +
+        stats["sharpe"] * 2 -
+        stats["drawdown"] * 2
+    )
+
 # ══════════════════════════════
 # التطور
 # ══════════════════════════════
@@ -75,11 +82,13 @@ def evolve(df, generations=GENERATIONS):
     # تحميل من Redis
     saved = load_best()
     if saved:
-        print(f"📂 تحميل استراتيجية محفوظة من Redis...")
+        saved_score = calc_score(saved["stats"])
+        print(f"📂 تحميل من Redis — Score={saved_score:.2f}")
         population = [saved["strategy"]]
         while len(population) < POPULATION_SIZE:
             population.append(generate_strategy())
     else:
+        saved_score = -999
         print("🎲 بدء عشوائي...")
         population = generate_population(POPULATION_SIZE)
 
@@ -114,8 +123,14 @@ def evolve(df, generations=GENERATIONS):
             best_score = gen_score
             best_ever = best_gen
             print(f" ⭐ أفضل حتى الآن!")
-            # حفظ فوري في Redis
-            save_best(best_ever["strategy"], best_ever["stats"])
+
+            # حفظ في Redis فقط لو أفضل من المحفوظ
+            if gen_score > saved_score:
+                save_best(best_ever["strategy"], best_ever["stats"])
+                saved_score = gen_score
+                print(f" 💾 أفضل من المحفوظ — تم التحديث ✅")
+            else:
+                print(f" ℹ️ المحفوظ في Redis أفضل — لا تغيير")
 
         # الجيل التالي
         new_population = [r["strategy"] for r in top]
