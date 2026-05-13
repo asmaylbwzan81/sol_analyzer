@@ -1,191 +1,138 @@
+import random
 import numpy as np
-import pandas as pd
+from features import ALL_FEATURES, BASE_FEATURES
 
 # ══════════════════════════════
-# إعدادات
+# الـ Features المتاحة (78 feature من 3 فريمات)
 # ══════════════════════════════
-SL_PCT = 0.0020 # 0.20% Stop Loss
-TP_PCT = 0.0050 # 0.50% Take Profit
-FEE = 0.0005 # 0.05% per side (taker)
-TOTAL_FEE = FEE * 2 # 0.10% دخول + خروج
-MIN_TRADES = 30 # أقل عدد صفقات مقبول
-MAX_CANDLES_WAIT = 30 # أقصى انتظار 30 شمعة (30 دقيقة على 1m)
+FEATURES = ALL_FEATURES
+
+OPERATORS = [">", "<"]
 
 # ══════════════════════════════
-# اختبار استراتيجية واحدة
+# نطاقات القيم لكل feature
 # ══════════════════════════════
-def backtest_strategy(strategy, df):
-    from strategy_generator import apply_strategy
+BASE_RANGES = {
+    "returns": (-0.05, 0.05),
+    "zscore": (-3.0, 3.0),
+    "zscore_50": (-3.0, 3.0),
+    "std_20": (0.0001, 0.01),
+    "std_50": (0.0001, 0.01),
+    "mean_reversion": (-3.0, 3.0),
+    "skewness": (-2.0, 2.0),
+    "kurtosis": (-1.0, 5.0),
+    "momentum_5": (-500, 500),
+    "momentum_10": (-1000, 1000),
+    "momentum_20": (-2000, 2000),
+    "momentum_pct": (-0.05, 0.05),
+    "acceleration": (-500, 500),
+    "hist_prob_up": (0.3, 0.7),
+    "hist_prob_big": (0.1, 0.9),
+    "percentile_rank": (0.0, 1.0),
+    "autocorr_1": (-1.0, 1.0),
+    "autocorr_5": (-1.0, 1.0),
+    "fourier_strength": (1.0, 10.0),
+    "entropy": (0.5, 3.0),
+    "volatility": (0.0001, 0.01),
+    "vol_ratio": (0.5, 3.0),
+    "volume_change": (-0.5, 2.0),
+    "volume_zscore": (-3.0, 3.0),
+    "price_range": (0.001, 0.05),
+    "close_position": (0.0, 1.0),
+}
 
-    trades = []
-    rows = df.to_dict("records")
-
-    for i in range(len(rows) - 1):
-        row = rows[i]
-        signal = apply_strategy(strategy, row)
-
-        if not signal:
-            continue
-
-        entry = rows[i + 1]["close"]
-        direction = strategy["direction"]
-
-        if direction == "LONG":
-            sl = entry * (1 - SL_PCT)
-            tp = entry * (1 + TP_PCT)
-        else:
-            sl = entry * (1 + SL_PCT)
-            tp = entry * (1 - TP_PCT)
-
-        # نبحث عن النتيجة في الشموع التالية
-        result = None
-        for j in range(i + 2, min(i + MAX_CANDLES_WAIT + 2, len(rows))):
-            high = rows[j]["high"]
-            low = rows[j]["low"]
-
-            if direction == "LONG":
-                if low <= sl:
-                    result = -SL_PCT - TOTAL_FEE
-                    break
-                if high >= tp:
-                    result = TP_PCT - TOTAL_FEE
-                    break
-            else:
-                if high >= sl:
-                    result = -SL_PCT - TOTAL_FEE
-                    break
-                if low <= tp:
-                    result = TP_PCT - TOTAL_FEE
-                    break
-
-        if result is not None:
-            trades.append(result)
-
-    return calc_stats(trades)
+# نبني RANGES للـ 3 فريمات
+RANGES = {}
+for prefix in ["1m_", "5m_", "15m_"]:
+    for feature, range_val in BASE_RANGES.items():
+        RANGES[f"{prefix}{feature}"] = range_val
 
 
 # ══════════════════════════════
-# حساب الإحصاء
+# توليد استراتيجية واحدة
 # ══════════════════════════════
-def calc_stats(trades):
-    if len(trades) < MIN_TRADES:
-        return None
+def generate_strategy():
+    """
+    يولد استراتيجية بـ 3 شروط:
+    - شرط من 1m (دخول دقيق)
+    - شرط من 5m (تأكيد)
+    - شرط من 15m (اتجاه عام)
+    """
+    conditions = []
 
-    trades = np.array(trades)
-    wins = trades[trades > 0]
-    losses = trades[trades < 0]
+    # شرط من كل فريم
+    for prefix in ["1m_", "5m_", "15m_"]:
+        prefix_features = [f for f in FEATURES if f.startswith(prefix)]
+        feature = random.choice(prefix_features)
+        operator = random.choice(OPERATORS)
+        low, high = RANGES[feature]
+        threshold = round(random.uniform(low, high), 6)
+        conditions.append({
+            "feature": feature,
+            "operator": operator,
+            "threshold": threshold
+        })
 
-    if len(losses) == 0:
-        return None
-
-    win_rate = len(wins) / len(trades)
-    total_profit = trades.sum()
-    profit_factor = wins.sum() / (abs(losses.sum()) + 1e-10)
-
-    # Drawdown
-    cumulative = np.cumsum(trades)
-    peak = np.maximum.accumulate(cumulative)
-    drawdown = ((peak - cumulative) / (np.abs(peak) + 1e-10)).max()
-
-    # Sharpe
-    sharpe = trades.mean() / (trades.std() + 1e-10) * np.sqrt(len(trades))
-
-    # متوسط الربح لكل صفقة
-    avg_profit = trades.mean()
+    # شرط إضافي عشوائي من أي فريم
+    extra_feature = random.choice(FEATURES)
+    low, high = RANGES[extra_feature]
+    conditions.append({
+        "feature": extra_feature,
+        "operator": random.choice(OPERATORS),
+        "threshold": round(random.uniform(low, high), 6)
+    })
 
     return {
-        "trades": len(trades),
-        "win_rate": round(win_rate, 4),
-        "total_profit": round(total_profit, 4),
-        "profit_factor": round(profit_factor, 4),
-        "drawdown": round(drawdown, 4),
-        "sharpe": round(sharpe, 4),
-        "avg_profit": round(avg_profit, 6),
+        "conditions": conditions,
+        "direction": random.choice(["LONG", "SHORT"])
     }
 
 
 # ══════════════════════════════
-# اختبار كل الاستراتيجيات
+# تطبيق الاستراتيجية على صف
 # ══════════════════════════════
-def run_backtest(population, df):
-    results = []
-
-    for i, strategy in enumerate(population):
-        if i % 100 == 0:
-            print(f"⚙️ اختبار {i}/{len(population)}...")
-
-        stats = backtest_strategy(strategy, df)
-        if stats:
-            results.append({
-                "strategy": strategy,
-                "stats": stats
-            })
-
-    return results
+def apply_strategy(strategy, row):
+    for cond in strategy["conditions"]:
+        val = row.get(cond["feature"])
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            return False
+        if cond["operator"] == ">" and not (val > cond["threshold"]):
+            return False
+        if cond["operator"] == "<" and not (val < cond["threshold"]):
+            return False
+    return True
 
 
 # ══════════════════════════════
-# فلترة الأفضل
+# توليد N استراتيجية
 # ══════════════════════════════
-def filter_best(results, top_n=10):
-    qualified = [
-        r for r in results
-        if r["stats"]["win_rate"] > 0.52 # win rate فوق 52%
-        and r["stats"]["drawdown"] < 0.15 # drawdown أقل من 15%
-        and r["stats"]["profit_factor"] > 1.3 # profit factor فوق 1.3
-        and r["stats"]["avg_profit"] > TOTAL_FEE # متوسط ربح يغطي الفي
-        and r["stats"]["trades"] >= MIN_TRADES # صفقات كافية
-    ]
+def generate_population(n=300):
+    return [generate_strategy() for _ in range(n)]
 
-    qualified.sort(
-        key=lambda x: x["stats"]["sharpe"],
-        reverse=True
-    )
 
-    return qualified[:top_n]
+# ══════════════════════════════
+# طباعة استراتيجية
+# ══════════════════════════════
+def print_strategy(strategy, index=0):
+    print(f"\n📋 استراتيجية {index+1} — {strategy['direction']}")
+    for cond in strategy["conditions"]:
+        print(f" {cond['feature']} {cond['operator']} {cond['threshold']}")
 
 
 # ══════════════════════════════
 # التشغيل
 # ══════════════════════════════
 if __name__ == "__main__":
-    from features import load_data, extract_features
-    from strategy_generator import generate_population, print_strategy
+    print("🧬 توليد 300 استراتيجية...")
+    population = generate_population(300)
 
-    print("📊 تحميل البيانات (1m)...")
-    df = load_data(interval="1m")
-    df = extract_features(df)
-    print(f"✅ {len(df)} صف جاهز")
+    print("\n📋 أمثلة (أول 3):")
+    for i, s in enumerate(population[:3]):
+        print_strategy(s, i)
 
-    print(f"\n💰 إعدادات التداول:")
-    print(f" TP: {TP_PCT*100:.2f}%")
-    print(f" SL: {SL_PCT*100:.2f}%")
-    print(f" Fee: {TOTAL_FEE*100:.2f}% (دخول + خروج)")
-    print(f" صافي TP: {(TP_PCT - TOTAL_FEE)*100:.2f}%")
-    print(f" صافي SL: {-(SL_PCT + TOTAL_FEE)*100:.2f}%")
-
-    print("\n🧬 توليد 1000 استراتيجية...")
-    population = generate_population(1000)
-
-    print("\n⚙️ بدء الاختبار...")
-    results = run_backtest(population, df)
-    print(f"✅ نتائج: {len(results)} استراتيجية لها صفقات كافية")
-
-    print("\n🏆 أفضل الاستراتيجيات:")
-    best = filter_best(results)
-
-    if best:
-        for i, r in enumerate(best):
-            print(f"\n{'='*40}")
-            print_strategy(r["strategy"], i)
-            s = r["stats"]
-            print(f" 📊 Win Rate: {s['win_rate']*100:.1f}%")
-            print(f" 💰 Total Profit: {s['total_profit']*100:.2f}%")
-            print(f" ⚡ Profit Factor: {s['profit_factor']}")
-            print(f" 📉 Drawdown: {s['drawdown']*100:.1f}%")
-            print(f" 📈 Sharpe: {s['sharpe']:.2f}")
-            print(f" 🔢 Trades: {s['trades']}")
-            print(f" 💵 Avg Profit: {s['avg_profit']*100:.4f}%")
-    else:
-        print("❌ ما في استراتيجية اجتازت المعايير — نكمل التطوير")
+    print(f"\n✅ تم توليد {len(population)} استراتيجية")
+    print(f"📊 عدد الـ Features المتاحة: {len(FEATURES)}")
+    print(f" 1m: {len([f for f in FEATURES if f.startswith('1m_')])} feature")
+    print(f" 5m: {len([f for f in FEATURES if f.startswith('5m_')])} feature")
+    print(f" 15m: {len([f for f in FEATURES if f.startswith('15m_')])} feature")
 
