@@ -5,10 +5,17 @@ from datetime import datetime
 
 BINGX_BASE = "https://open-api.bingx.com"
 SYMBOL = "BTC-USDT"
-INTERVAL = "5m"
-TARGET_CANDLES = 20000
-MAX_PER_REQUEST = 1440
 DB_PATH = "market_data.db"
+MAX_PER_REQUEST = 1440
+
+# ══════════════════════════════
+# إعدادات الفريمات
+# ══════════════════════════════
+TIMEFRAMES = {
+    "1m": 50000, # ~35 يوم
+    "5m": 20000, # ~70 يوم
+    "15m": 10000, # ~104 يوم
+}
 
 # ══════════════════════════════
 # قاعدة البيانات
@@ -18,20 +25,22 @@ def init_db():
     c = conn.cursor()
     c.execute('''
         CREATE TABLE IF NOT EXISTS candles (
-            timestamp INTEGER PRIMARY KEY,
+            timestamp INTEGER,
             symbol TEXT,
             interval TEXT,
             open REAL,
             high REAL,
             low REAL,
             close REAL,
-            volume REAL
+            volume REAL,
+            PRIMARY KEY (timestamp, symbol, interval)
         )
     ''')
     conn.commit()
     conn.close()
+    print("✅ قاعدة البيانات جاهزة")
 
-def save_candles(candles, symbol=SYMBOL, interval=INTERVAL):
+def save_candles(candles, symbol=SYMBOL, interval="5m"):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.executemany('''
@@ -46,16 +55,26 @@ def save_candles(candles, symbol=SYMBOL, interval=INTERVAL):
     conn.commit()
     conn.close()
 
-def load_candles(symbol=SYMBOL, interval=INTERVAL, limit=TARGET_CANDLES):
+def load_candles(symbol=SYMBOL, interval="5m", limit=None):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('''
-        SELECT timestamp, open, high, low, close, volume
-        FROM candles
-        WHERE symbol=? AND interval=?
-        ORDER BY timestamp DESC
-        LIMIT ?
-    ''', (symbol, interval, limit))
+
+    if limit:
+        c.execute('''
+            SELECT timestamp, open, high, low, close, volume
+            FROM candles
+            WHERE symbol=? AND interval=?
+            ORDER BY timestamp DESC
+            LIMIT ?
+        ''', (symbol, interval, limit))
+    else:
+        c.execute('''
+            SELECT timestamp, open, high, low, close, volume
+            FROM candles
+            WHERE symbol=? AND interval=?
+            ORDER BY timestamp DESC
+        ''', (symbol, interval))
+
     rows = c.fetchall()
     conn.close()
     return [{
@@ -67,7 +86,7 @@ def load_candles(symbol=SYMBOL, interval=INTERVAL, limit=TARGET_CANDLES):
         "volume": r[5]
     } for r in reversed(rows)]
 
-def count_candles(symbol=SYMBOL, interval=INTERVAL):
+def count_candles(symbol=SYMBOL, interval="5m"):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('SELECT COUNT(*) FROM candles WHERE symbol=? AND interval=?',
@@ -79,9 +98,11 @@ def count_candles(symbol=SYMBOL, interval=INTERVAL):
 # ══════════════════════════════
 # جلب البيانات من BingX
 # ══════════════════════════════
-def fetch_candles(symbol=SYMBOL, interval=INTERVAL, target=TARGET_CANDLES):
+def fetch_candles(symbol=SYMBOL, interval="5m", target=20000):
     all_candles = []
     end_time = None
+
+    print(f"📥 جلب {target} شمعة | {symbol} | {interval}")
 
     while len(all_candles) < target:
         try:
@@ -104,7 +125,6 @@ def fetch_candles(symbol=SYMBOL, interval=INTERVAL, target=TARGET_CANDLES):
                 break
 
             candles = sorted(candles, key=lambda x: x["time"])
-
             batch = [{
                 "timestamp": int(c["time"]),
                 "open": float(c["open"]),
@@ -117,7 +137,7 @@ def fetch_candles(symbol=SYMBOL, interval=INTERVAL, target=TARGET_CANDLES):
             all_candles = batch + all_candles
             end_time = candles[0]["time"] - 1
 
-            print(f"📥 جمعنا {len(all_candles)} شمعة...")
+            print(f" 📥 {len(all_candles)}/{target}...")
             time.sleep(0.3)
 
         except Exception as e:
@@ -127,8 +147,74 @@ def fetch_candles(symbol=SYMBOL, interval=INTERVAL, target=TARGET_CANDLES):
     return all_candles[:target]
 
 # ══════════════════════════════
+# تحميل الـ 3 فريمات دفعة وحدة
+# ══════════════════════════════
+def init_all_timeframes(symbol=SYMBOL):
+    """يجيب ويحفظ الـ 3 فريمات إذا ما موجودة"""
+    init_db()
+
+    for interval, target in TIMEFRAMES.items():
+        existing = count_candles(symbol, interval)
+        print(f"📊 {interval}: موجود {existing}/{target}")
+
+        if existing < target:
+            print(f"📥 جلب {interval}...")
+            candles = fetch_candles(symbol, interval, target)
+            save_candles(candles, symbol, interval)
+            print(f"✅ {interval}: تم حفظ {count_candles(symbol, interval)} شمعة")
+        else:
+            print(f"✅ {interval}: جاهز")
+
+def load_all_timeframes(symbol=SYMBOL):
+    """يرجع dict فيه DataFrame لكل فريم"""
+    import pandas as pd
+
+    result = {}
+    for interval in TIMEFRAMES.keys():
+        candles = load_candles(symbol, interval)
+        if candles:
+            df = pd.DataFrame(candles)
+            result[interval] = df
+            print(f"✅ {interval}: {len(df)} شمعة محملة")
+        else:
+            print(f"⚠️ {interval}: ما في بيانات!")
+
+    return result
+
+# ══════════════════════════════
 # Helper Functions
 # ══════════════════════════════
+def get_latest_candle(symbol=SYMBOL, interval="1m"):
+    """يجيب آخر شمعة مباشرة من BingX"""
+    try:
+        params = {
+            "symbol": symbol,
+            "interval": interval,
+            "limit": 1
+        }
+        response = requests.get(
+            f"{BINGX_BASE}/openApi/swap/v2/quote/klines",
+            params=params,
+            timeout=10
+        ).json()
+
+        candles = response.get("data", [])
+        if not candles:
+            return None
+
+        c = candles[0]
+        return {
+            "timestamp": int(c["time"]),
+            "open": float(c["open"]),
+            "high": float(c["high"]),
+            "low": float(c["low"]),
+            "close": float(c["close"]),
+            "volume": float(c["volume"])
+        }
+    except Exception as e:
+        print(f"❌ خطأ جلب آخر شمعة: {e}")
+        return None
+
 def get_closes(candles):
     return [c["close"] for c in candles]
 
@@ -145,20 +231,17 @@ def get_lows(candles):
 # التشغيل
 # ══════════════════════════════
 if __name__ == "__main__":
-    init_db()
+    print("🚀 تهيئة قاعدة البيانات والفريمات...")
+    print("━" * 40)
 
-    existing = count_candles()
-    print(f"📊 الموجود في قاعدة البيانات: {existing} شمعة")
+    init_all_timeframes()
 
-    if existing < TARGET_CANDLES:
-        print("📥 جاري جلب البيانات من BingX...")
-        candles = fetch_candles()
-        save_candles(candles)
-        print(f"✅ تم الحفظ: {count_candles()} شمعة")
-    else:
-        print("✅ البيانات موجودة، نحمّل من قاعدة البيانات")
+    print("\n📊 ملخص البيانات:")
+    print("━" * 40)
+    for interval in TIMEFRAMES.keys():
+        count = count_candles(SYMBOL, interval)
+        candles = load_candles(SYMBOL, interval, limit=1)
+        if candles:
+            last = datetime.fromtimestamp(candles[-1]["timestamp"] / 1000)
+            print(f" {interval}: {count} شمعة | آخر شمعة: {last}")
 
-    candles = load_candles()
-    print(f"📅 من: {datetime.fromtimestamp(candles[0]['timestamp']/1000)}")
-    print(f"📅 إلى: {datetime.fromtimestamp(candles[-1]['timestamp']/1000)}")
-    print(f"🕯️ عدد الشموع: {len(candles)}")
