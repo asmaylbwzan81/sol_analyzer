@@ -1,5 +1,6 @@
-import time
+،import time
 import threading
+import traceback
 from datetime import datetime
 from data_engine import init_all_timeframes, load_all_timeframes, count_candles
 from features import extract_all_features
@@ -12,10 +13,10 @@ from news_filter import should_trade
 # إعدادات
 # ══════════════════════════════
 SYMBOL = "BTC-USDT"
-MAX_OPEN_TRADES = 5 # أقصى صفقات متزامنة
-CAPITAL_PER_TRADE = 10 # دولار لكل صفقة
-LEVERAGE = 3 # leverage
-EVOLVE_INTERVAL = 3600 # نطور الاستراتيجية كل ساعة (بالثواني)
+MAX_OPEN_TRADES = 5
+CAPITAL_PER_TRADE = 10
+LEVERAGE = 3
+EVOLVE_INTERVAL = 3600
 TARGET_CANDLES = {
     "1m": 50000,
     "5m": 20000,
@@ -31,7 +32,7 @@ lock = threading.Lock()
 
 
 # ══════════════════════════════
-# تحميل وتحديث البيانات
+# تحميل البيانات
 # ══════════════════════════════
 def prepare_data():
     print("📊 فحص قاعدة البيانات...")
@@ -52,40 +53,49 @@ def prepare_data():
 
 
 # ══════════════════════════════
-# حلقة التطور (thread منفصل)
+# حلقة التطور
 # ══════════════════════════════
 def evolution_loop(df):
     global best_strategy
 
     round_num = 1
     while True:
-        print(f"\n{'═'*40}")
-        print(f"🧬 دورة التطور {round_num} — {datetime.now().strftime('%H:%M:%S')}")
-        print(f"{'═'*40}")
+        try:
+            print(f"\n{'═'*40}")
+            print(f"🧬 دورة التطور {round_num} — {datetime.now().strftime('%H:%M:%S')}")
+            print(f"{'═'*40}")
 
-        best = evolve(df)
+            best = evolve(df)
 
-        if best:
-            s = best["stats"]
-            with lock:
-                best_strategy = best["strategy"]
+            if best:
+                s = best["stats"]
+                with lock:
+                    best_strategy = best["strategy"]
 
-            print(f"\n🏆 أفضل الدورة {round_num}:")
-            print_strategy(best["strategy"], 0)
-            print(f" 📊 Win Rate: {s['win_rate']*100:.1f}%")
-            print(f" 💰 Total Profit: {s['total_profit']*100:.2f}%")
-            print(f" 📉 Drawdown: {s['drawdown']*100:.1f}%")
-            print(f" 📈 Sharpe: {s['sharpe']:.2f}")
-            print(f" 🔢 Trades: {s['trades']}")
-            print(f" 💵 Avg Profit: {s['avg_profit']*100:.3f}%")
+                print(f"\n🏆 أفضل الدورة {round_num}:")
+                print_strategy(best["strategy"], 0)
+                print(f" 📊 Win Rate: {s['win_rate']*100:.1f}%")
+                print(f" 💰 Total Profit: {s['total_profit']*100:.2f}%")
+                print(f" 📉 Drawdown: {s['drawdown']*100:.1f}%")
+                print(f" 📈 Sharpe: {s['sharpe']:.2f}")
+                print(f" 🔢 Trades: {s['trades']}")
+                print(f" 💵 Avg Profit: {s['avg_profit']*100:.3f}%")
+            else:
+                print("⚠️ ما لاقى استراتيجية بهالدورة")
 
-        round_num += 1
-        print(f"\n⏳ انتظار {EVOLVE_INTERVAL//60} دقيقة للدورة القادمة...")
-        time.sleep(EVOLVE_INTERVAL)
+            round_num += 1
+            print(f"\n⏳ انتظار {EVOLVE_INTERVAL//60} دقيقة للدورة القادمة...")
+            time.sleep(EVOLVE_INTERVAL)
+
+        except Exception as e:
+            print(f"❌ خطأ بـ evolution_loop: {e}")
+            traceback.print_exc()
+            print("🔄 إعادة المحاولة بعد دقيقة...")
+            time.sleep(60)
 
 
 # ══════════════════════════════
-# حلقة التداول (thread منفصل)
+# حلقة التداول
 # ══════════════════════════════
 def trading_loop():
     global open_trades, best_strategy
@@ -94,19 +104,16 @@ def trading_loop():
 
     while True:
         try:
-            # 1. فحص الأخبار
             trade_ok, reason = should_trade("bitcoin")
             if not trade_ok:
                 print(f"🚫 {reason}")
                 time.sleep(60)
                 continue
 
-            # 2. فحص الاستراتيجية
             with lock:
                 strategy = best_strategy
 
             if strategy is None:
-                # جرب تحمل من Redis
                 saved = load_best()
                 if saved:
                     strategy = saved["strategy"]
@@ -118,7 +125,6 @@ def trading_loop():
                     time.sleep(30)
                     continue
 
-            # 3. فحص عدد الصفقات المفتوحة
             with lock:
                 current_open = len(open_trades)
 
@@ -126,9 +132,9 @@ def trading_loop():
                 time.sleep(5)
                 continue
 
-            # 4. جيب آخر بيانات
             from data_engine import load_all_timeframes
             from features import extract_all_features
+            from strategy_generator import apply_strategy
 
             dfs = load_all_timeframes(SYMBOL)
             df = extract_all_features(dfs)
@@ -137,8 +143,6 @@ def trading_loop():
                 time.sleep(10)
                 continue
 
-            # 5. تحقق من الإشارة
-            from strategy_generator import apply_strategy
             last_row = df.iloc[-1].to_dict()
             signal = apply_strategy(strategy, last_row)
 
@@ -146,9 +150,6 @@ def trading_loop():
                 direction = strategy["direction"]
                 print(f"\n🚀 إشارة {direction} | {datetime.now().strftime('%H:%M:%S')}")
                 print(f" 💵 ${CAPITAL_PER_TRADE} × {LEVERAGE}x = ${CAPITAL_PER_TRADE * LEVERAGE}")
-
-                # TODO: ربط API BingX للتنفيذ الحقيقي
-                # execute_trade(direction, CAPITAL_PER_TRADE, LEVERAGE)
 
                 with lock:
                     open_trades.append({
@@ -158,10 +159,11 @@ def trading_loop():
                     })
                     print(f" 📊 صفقات مفتوحة: {len(open_trades)}/{MAX_OPEN_TRADES}")
 
-            time.sleep(10) # فحص كل 10 ثواني
+            time.sleep(10)
 
         except Exception as e:
-            print(f"❌ خطأ: {e}")
+            print(f"❌ خطأ بـ trading_loop: {e}")
+            traceback.print_exc()
             time.sleep(30)
 
 
@@ -177,10 +179,8 @@ def main():
     print(f" 💰 قوة شراء/صفقة: ${CAPITAL_PER_TRADE * LEVERAGE}")
     print("━" * 40)
 
-    # 1. تحضير البيانات
     df = prepare_data()
 
-    # 2. تشغيل thread التطور
     evolution_thread = threading.Thread(
         target=evolution_loop,
         args=(df,),
@@ -189,7 +189,6 @@ def main():
     evolution_thread.start()
     print("\n🧬 Thread التطور بدأ...")
 
-    # 3. تشغيل thread التداول
     trading_thread = threading.Thread(
         target=trading_loop,
         daemon=True
@@ -197,7 +196,6 @@ def main():
     trading_thread.start()
     print("⚡ Thread التداول بدأ...")
 
-    # 4. keep alive
     print("\n✅ النظام شغال — Ctrl+C للإيقاف")
     try:
         while True:
