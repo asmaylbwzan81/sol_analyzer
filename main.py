@@ -1,191 +1,214 @@
-import numpy as np
-import pandas as pd
+import time
+import threading
+from datetime import datetime
+from data_engine import init_all_timeframes, load_all_timeframes, count_candles
+from features import extract_all_features
+from evolution import evolve
+from strategy_generator import print_strategy
+from redis_store import load_best
+from news_filter import should_trade
 
 # ══════════════════════════════
 # إعدادات
 # ══════════════════════════════
-SL_PCT = 0.0020 # 0.20% Stop Loss
-TP_PCT = 0.0050 # 0.50% Take Profit
-FEE = 0.0005 # 0.05% per side (taker)
-TOTAL_FEE = FEE * 2 # 0.10% دخول + خروج
-MIN_TRADES = 30 # أقل عدد صفقات مقبول
-MAX_CANDLES_WAIT = 30 # أقصى انتظار 30 شمعة (30 دقيقة على 1m)
+SYMBOL = "BTC-USDT"
+MAX_OPEN_TRADES = 5 # أقصى صفقات متزامنة
+CAPITAL_PER_TRADE = 10 # دولار لكل صفقة
+LEVERAGE = 3 # leverage
+EVOLVE_INTERVAL = 3600 # نطور الاستراتيجية كل ساعة (بالثواني)
+TARGET_CANDLES = {
+    "1m": 50000,
+    "5m": 20000,
+    "15m": 10000,
+}
 
 # ══════════════════════════════
-# اختبار استراتيجية واحدة
+# حالة النظام
 # ══════════════════════════════
-def backtest_strategy(strategy, df):
-    from strategy_generator import apply_strategy
-
-    trades = []
-    rows = df.to_dict("records")
-
-    for i in range(len(rows) - 1):
-        row = rows[i]
-        signal = apply_strategy(strategy, row)
-
-        if not signal:
-            continue
-
-        entry = rows[i + 1]["close"]
-        direction = strategy["direction"]
-
-        if direction == "LONG":
-            sl = entry * (1 - SL_PCT)
-            tp = entry * (1 + TP_PCT)
-        else:
-            sl = entry * (1 + SL_PCT)
-            tp = entry * (1 - TP_PCT)
-
-        # نبحث عن النتيجة في الشموع التالية
-        result = None
-        for j in range(i + 2, min(i + MAX_CANDLES_WAIT + 2, len(rows))):
-            high = rows[j]["high"]
-            low = rows[j]["low"]
-
-            if direction == "LONG":
-                if low <= sl:
-                    result = -SL_PCT - TOTAL_FEE
-                    break
-                if high >= tp:
-                    result = TP_PCT - TOTAL_FEE
-                    break
-            else:
-                if high >= sl:
-                    result = -SL_PCT - TOTAL_FEE
-                    break
-                if low <= tp:
-                    result = TP_PCT - TOTAL_FEE
-                    break
-
-        if result is not None:
-            trades.append(result)
-
-    return calc_stats(trades)
+open_trades = []
+best_strategy = None
+lock = threading.Lock()
 
 
 # ══════════════════════════════
-# حساب الإحصاء
+# تحميل وتحديث البيانات
 # ══════════════════════════════
-def calc_stats(trades):
-    if len(trades) < MIN_TRADES:
-        return None
+def prepare_data():
+    print("📊 فحص قاعدة البيانات...")
+    init_all_timeframes(SYMBOL)
 
-    trades = np.array(trades)
-    wins = trades[trades > 0]
-    losses = trades[trades < 0]
+    for interval, target in TARGET_CANDLES.items():
+        count = count_candles(SYMBOL, interval)
+        print(f" ✅ {interval}: {count} شمعة")
 
-    if len(losses) == 0:
-        return None
+    print("\n📐 تحميل الفريمات...")
+    dfs = load_all_timeframes(SYMBOL)
 
-    win_rate = len(wins) / len(trades)
-    total_profit = trades.sum()
-    profit_factor = wins.sum() / (abs(losses.sum()) + 1e-10)
+    print("⚙️ استخراج الـ Features...")
+    df_features = extract_all_features(dfs)
+    print(f"✅ {len(df_features)} صف | {len(df_features.columns)} feature")
 
-    # Drawdown
-    cumulative = np.cumsum(trades)
-    peak = np.maximum.accumulate(cumulative)
-    drawdown = ((peak - cumulative) / (np.abs(peak) + 1e-10)).max()
-
-    # Sharpe
-    sharpe = trades.mean() / (trades.std() + 1e-10) * np.sqrt(len(trades))
-
-    # متوسط الربح لكل صفقة
-    avg_profit = trades.mean()
-
-    return {
-        "trades": len(trades),
-        "win_rate": round(win_rate, 4),
-        "total_profit": round(total_profit, 4),
-        "profit_factor": round(profit_factor, 4),
-        "drawdown": round(drawdown, 4),
-        "sharpe": round(sharpe, 4),
-        "avg_profit": round(avg_profit, 6),
-    }
+    return df_features
 
 
 # ══════════════════════════════
-# اختبار كل الاستراتيجيات
+# حلقة التطور (thread منفصل)
 # ══════════════════════════════
-def run_backtest(population, df):
-    results = []
+def evolution_loop(df):
+    global best_strategy
 
-    for i, strategy in enumerate(population):
-        if i % 100 == 0:
-            print(f"⚙️ اختبار {i}/{len(population)}...")
+    round_num = 1
+    while True:
+        print(f"\n{'═'*40}")
+        print(f"🧬 دورة التطور {round_num} — {datetime.now().strftime('%H:%M:%S')}")
+        print(f"{'═'*40}")
 
-        stats = backtest_strategy(strategy, df)
-        if stats:
-            results.append({
-                "strategy": strategy,
-                "stats": stats
-            })
+        best = evolve(df)
 
-    return results
+        if best:
+            s = best["stats"]
+            with lock:
+                best_strategy = best["strategy"]
 
-
-# ══════════════════════════════
-# فلترة الأفضل
-# ══════════════════════════════
-def filter_best(results, top_n=10):
-    qualified = [
-        r for r in results
-        if r["stats"]["win_rate"] > 0.52 # win rate فوق 52%
-        and r["stats"]["drawdown"] < 0.15 # drawdown أقل من 15%
-        and r["stats"]["profit_factor"] > 1.3 # profit factor فوق 1.3
-        and r["stats"]["avg_profit"] > TOTAL_FEE # متوسط ربح يغطي الفي
-        and r["stats"]["trades"] >= MIN_TRADES # صفقات كافية
-    ]
-
-    qualified.sort(
-        key=lambda x: x["stats"]["sharpe"],
-        reverse=True
-    )
-
-    return qualified[:top_n]
-
-
-# ══════════════════════════════
-# التشغيل
-# ══════════════════════════════
-if __name__ == "__main__":
-    from features import load_data, extract_features
-    from strategy_generator import generate_population, print_strategy
-
-    print("📊 تحميل البيانات (1m)...")
-    df = load_data(interval="1m")
-    df = extract_features(df)
-    print(f"✅ {len(df)} صف جاهز")
-
-    print(f"\n💰 إعدادات التداول:")
-    print(f" TP: {TP_PCT*100:.2f}%")
-    print(f" SL: {SL_PCT*100:.2f}%")
-    print(f" Fee: {TOTAL_FEE*100:.2f}% (دخول + خروج)")
-    print(f" صافي TP: {(TP_PCT - TOTAL_FEE)*100:.2f}%")
-    print(f" صافي SL: {-(SL_PCT + TOTAL_FEE)*100:.2f}%")
-
-    print("\n🧬 توليد 1000 استراتيجية...")
-    population = generate_population(1000)
-
-    print("\n⚙️ بدء الاختبار...")
-    results = run_backtest(population, df)
-    print(f"✅ نتائج: {len(results)} استراتيجية لها صفقات كافية")
-
-    print("\n🏆 أفضل الاستراتيجيات:")
-    best = filter_best(results)
-
-    if best:
-        for i, r in enumerate(best):
-            print(f"\n{'='*40}")
-            print_strategy(r["strategy"], i)
-            s = r["stats"]
+            print(f"\n🏆 أفضل الدورة {round_num}:")
+            print_strategy(best["strategy"], 0)
             print(f" 📊 Win Rate: {s['win_rate']*100:.1f}%")
             print(f" 💰 Total Profit: {s['total_profit']*100:.2f}%")
-            print(f" ⚡ Profit Factor: {s['profit_factor']}")
             print(f" 📉 Drawdown: {s['drawdown']*100:.1f}%")
             print(f" 📈 Sharpe: {s['sharpe']:.2f}")
             print(f" 🔢 Trades: {s['trades']}")
-            print(f" 💵 Avg Profit: {s['avg_profit']*100:.4f}%")
-    else:
-        print("❌ ما في استراتيجية اجتازت المعايير — نكمل التطوير")
+            print(f" 💵 Avg Profit: {s['avg_profit']*100:.3f}%")
+
+        round_num += 1
+        print(f"\n⏳ انتظار {EVOLVE_INTERVAL//60} دقيقة للدورة القادمة...")
+        time.sleep(EVOLVE_INTERVAL)
+
+
+# ══════════════════════════════
+# حلقة التداول (thread منفصل)
+# ══════════════════════════════
+def trading_loop():
+    global open_trades, best_strategy
+
+    print("\n⚡ حلقة التداول بدأت...")
+
+    while True:
+        try:
+            # 1. فحص الأخبار
+            trade_ok, reason = should_trade("bitcoin")
+            if not trade_ok:
+                print(f"🚫 {reason}")
+                time.sleep(60)
+                continue
+
+            # 2. فحص الاستراتيجية
+            with lock:
+                strategy = best_strategy
+
+            if strategy is None:
+                # جرب تحمل من Redis
+                saved = load_best()
+                if saved:
+                    strategy = saved["strategy"]
+                    with lock:
+                        best_strategy = strategy
+                    print("📂 استراتيجية محملة من Redis")
+                else:
+                    print("⏳ انتظار الاستراتيجية الأولى...")
+                    time.sleep(30)
+                    continue
+
+            # 3. فحص عدد الصفقات المفتوحة
+            with lock:
+                current_open = len(open_trades)
+
+            if current_open >= MAX_OPEN_TRADES:
+                time.sleep(5)
+                continue
+
+            # 4. جيب آخر بيانات
+            from data_engine import load_all_timeframes
+            from features import extract_all_features
+
+            dfs = load_all_timeframes(SYMBOL)
+            df = extract_all_features(dfs)
+
+            if df.empty:
+                time.sleep(10)
+                continue
+
+            # 5. تحقق من الإشارة
+            from strategy_generator import apply_strategy
+            last_row = df.iloc[-1].to_dict()
+            signal = apply_strategy(strategy, last_row)
+
+            if signal:
+                direction = strategy["direction"]
+                print(f"\n🚀 إشارة {direction} | {datetime.now().strftime('%H:%M:%S')}")
+                print(f" 💵 ${CAPITAL_PER_TRADE} × {LEVERAGE}x = ${CAPITAL_PER_TRADE * LEVERAGE}")
+
+                # TODO: ربط API BingX للتنفيذ الحقيقي
+                # execute_trade(direction, CAPITAL_PER_TRADE, LEVERAGE)
+
+                with lock:
+                    open_trades.append({
+                        "direction": direction,
+                        "time": datetime.now(),
+                        "capital": CAPITAL_PER_TRADE
+                    })
+                    print(f" 📊 صفقات مفتوحة: {len(open_trades)}/{MAX_OPEN_TRADES}")
+
+            time.sleep(10) # فحص كل 10 ثواني
+
+        except Exception as e:
+            print(f"❌ خطأ: {e}")
+            time.sleep(30)
+
+
+# ══════════════════════════════
+# Main
+# ══════════════════════════════
+def main():
+    print("🚀 Quant Bot Started — نظام Simons")
+    print("━" * 40)
+    print(f" 💵 رأس المال/صفقة: ${CAPITAL_PER_TRADE}")
+    print(f" ⚡ Leverage: {LEVERAGE}x")
+    print(f" 📊 صفقات متزامنة: {MAX_OPEN_TRADES}")
+    print(f" 💰 قوة شراء/صفقة: ${CAPITAL_PER_TRADE * LEVERAGE}")
+    print("━" * 40)
+
+    # 1. تحضير البيانات
+    df = prepare_data()
+
+    # 2. تشغيل thread التطور
+    evolution_thread = threading.Thread(
+        target=evolution_loop,
+        args=(df,),
+        daemon=True
+    )
+    evolution_thread.start()
+    print("\n🧬 Thread التطور بدأ...")
+
+    # 3. تشغيل thread التداول
+    trading_thread = threading.Thread(
+        target=trading_loop,
+        daemon=True
+    )
+    trading_thread.start()
+    print("⚡ Thread التداول بدأ...")
+
+    # 4. keep alive
+    print("\n✅ النظام شغال — Ctrl+C للإيقاف")
+    try:
+        while True:
+            time.sleep(60)
+            with lock:
+                print(f"\n📊 [{datetime.now().strftime('%H:%M:%S')}] "
+                      f"صفقات مفتوحة: {len(open_trades)}/{MAX_OPEN_TRADES}")
+    except KeyboardInterrupt:
+        print("\n🛑 النظام أوقف")
+
+
+if __name__ == "__main__":
+    main()
 
