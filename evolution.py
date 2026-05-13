@@ -180,4 +180,3 @@ def evolve(df, generations=GENERATIONS):
         population = new_population
 
     return best_ever
-
