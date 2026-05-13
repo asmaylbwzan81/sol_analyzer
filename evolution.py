@@ -1,191 +1,183 @@
+import random
 import numpy as np
-import pandas as pd
+from strategy_generator import generate_strategy, generate_population, FEATURES, RANGES, OPERATORS
+from backtester import run_backtest, TOTAL_FEE
+from redis_store import save_best, load_best
 
 # ══════════════════════════════
 # إعدادات
 # ══════════════════════════════
-SL_PCT = 0.0020 # 0.20% Stop Loss
-TP_PCT = 0.0050 # 0.50% Take Profit
-FEE = 0.0005 # 0.05% per side (taker)
-TOTAL_FEE = FEE * 2 # 0.10% دخول + خروج
-MIN_TRADES = 30 # أقل عدد صفقات مقبول
-MAX_CANDLES_WAIT = 30 # أقصى انتظار 30 شمعة (30 دقيقة على 1m)
+POPULATION_SIZE = 300
+GENERATIONS = 50
+TOP_KEEP = 30
+TARGET_TRADES = 200 # هدف عدد الصفقات اليومي
 
 # ══════════════════════════════
-# اختبار استراتيجية واحدة
+# Mutation
 # ══════════════════════════════
-def backtest_strategy(strategy, df):
-    from strategy_generator import apply_strategy
+def mutate(strategy):
+    new = {
+        "conditions": [c.copy() for c in strategy["conditions"]],
+        "direction": strategy["direction"]
+    }
+    cond = random.choice(new["conditions"])
+    change = random.choice(["threshold", "threshold", "operator", "feature"])
 
-    trades = []
-    rows = df.to_dict("records")
+    if change == "threshold":
+        low, high = RANGES[cond["feature"]]
+        current = cond["threshold"]
+        delta = (high - low) * 0.1
+        cond["threshold"] = round(
+            max(low, min(high, current + random.uniform(-delta, delta))), 6
+        )
+    elif change == "operator":
+        cond["operator"] = ">" if cond["operator"] == "<" else "<"
+    elif change == "feature":
+        # نحافظ على نفس الفريم
+        prefix = cond["feature"].split("_")[0] + "_"
+        same_prefix = [f for f in FEATURES if f.startswith(prefix)]
+        new_feature = random.choice(same_prefix)
+        low, high = RANGES[new_feature]
+        cond["feature"] = new_feature
+        cond["operator"] = random.choice(OPERATORS)
+        cond["threshold"] = round(random.uniform(low, high), 6)
 
-    for i in range(len(rows) - 1):
-        row = rows[i]
-        signal = apply_strategy(strategy, row)
-
-        if not signal:
-            continue
-
-        entry = rows[i + 1]["close"]
-        direction = strategy["direction"]
-
-        if direction == "LONG":
-            sl = entry * (1 - SL_PCT)
-            tp = entry * (1 + TP_PCT)
-        else:
-            sl = entry * (1 + SL_PCT)
-            tp = entry * (1 - TP_PCT)
-
-        # نبحث عن النتيجة في الشموع التالية
-        result = None
-        for j in range(i + 2, min(i + MAX_CANDLES_WAIT + 2, len(rows))):
-            high = rows[j]["high"]
-            low = rows[j]["low"]
-
-            if direction == "LONG":
-                if low <= sl:
-                    result = -SL_PCT - TOTAL_FEE
-                    break
-                if high >= tp:
-                    result = TP_PCT - TOTAL_FEE
-                    break
-            else:
-                if high >= sl:
-                    result = -SL_PCT - TOTAL_FEE
-                    break
-                if low <= tp:
-                    result = TP_PCT - TOTAL_FEE
-                    break
-
-        if result is not None:
-            trades.append(result)
-
-    return calc_stats(trades)
+    return new
 
 
 # ══════════════════════════════
-# حساب الإحصاء
+# Crossover
 # ══════════════════════════════
-def calc_stats(trades):
-    if len(trades) < MIN_TRADES:
-        return None
+def crossover(s1, s2):
+    # نحافظ على توزيع الفريمات
+    conditions = []
+    for prefix in ["1m_", "5m_", "15m_"]:
+        c1 = [c for c in s1["conditions"] if c["feature"].startswith(prefix)]
+        c2 = [c for c in s2["conditions"] if c["feature"].startswith(prefix)]
+        pool = c1 + c2
+        if pool:
+            conditions.append(random.choice(pool))
 
-    trades = np.array(trades)
-    wins = trades[trades > 0]
-    losses = trades[trades < 0]
-
-    if len(losses) == 0:
-        return None
-
-    win_rate = len(wins) / len(trades)
-    total_profit = trades.sum()
-    profit_factor = wins.sum() / (abs(losses.sum()) + 1e-10)
-
-    # Drawdown
-    cumulative = np.cumsum(trades)
-    peak = np.maximum.accumulate(cumulative)
-    drawdown = ((peak - cumulative) / (np.abs(peak) + 1e-10)).max()
-
-    # Sharpe
-    sharpe = trades.mean() / (trades.std() + 1e-10) * np.sqrt(len(trades))
-
-    # متوسط الربح لكل صفقة
-    avg_profit = trades.mean()
+    # شرط إضافي عشوائي
+    extra_pool = s1["conditions"] + s2["conditions"]
+    conditions.append(random.choice(extra_pool))
 
     return {
-        "trades": len(trades),
-        "win_rate": round(win_rate, 4),
-        "total_profit": round(total_profit, 4),
-        "profit_factor": round(profit_factor, 4),
-        "drawdown": round(drawdown, 4),
-        "sharpe": round(sharpe, 4),
-        "avg_profit": round(avg_profit, 6),
+        "conditions": conditions,
+        "direction": random.choice([s1["direction"], s2["direction"]])
     }
 
 
 # ══════════════════════════════
-# اختبار كل الاستراتيجيات
+# Score - يكافئ كثرة الصفقات والربح الحقيقي
 # ══════════════════════════════
-def run_backtest(population, df):
-    results = []
+def score_result(r):
+    s = r["stats"]
 
-    for i, strategy in enumerate(population):
-        if i % 100 == 0:
-            print(f"⚙️ اختبار {i}/{len(population)}...")
+    # مكافأة كثرة الصفقات (هدف 200 صفقة)
+    trade_bonus = min(s["trades"] / TARGET_TRADES, 1.0)
 
-        stats = backtest_strategy(strategy, df)
-        if stats:
-            results.append({
-                "strategy": strategy,
-                "stats": stats
-            })
+    # التأكد إن متوسط الربح يغطي الفي
+    fee_penalty = 1.0 if s["avg_profit"] > TOTAL_FEE else 0.3
 
-    return results
+    return (
+        s["win_rate"] * 3 +
+        s["sharpe"] * 2 +
+        s["profit_factor"] * 1 -
+        s["drawdown"] * 2
+    ) * trade_bonus * fee_penalty
 
 
-# ══════════════════════════════
-# فلترة الأفضل
-# ══════════════════════════════
-def filter_best(results, top_n=10):
-    qualified = [
-        r for r in results
-        if r["stats"]["win_rate"] > 0.52 # win rate فوق 52%
-        and r["stats"]["drawdown"] < 0.15 # drawdown أقل من 15%
-        and r["stats"]["profit_factor"] > 1.3 # profit factor فوق 1.3
-        and r["stats"]["avg_profit"] > TOTAL_FEE # متوسط ربح يغطي الفي
-        and r["stats"]["trades"] >= MIN_TRADES # صفقات كافية
-    ]
-
-    qualified.sort(
-        key=lambda x: x["stats"]["sharpe"],
-        reverse=True
-    )
-
-    return qualified[:top_n]
+def calc_score(stats):
+    trade_bonus = min(stats.get("trades", 0) / TARGET_TRADES, 1.0)
+    fee_penalty = 1.0 if stats.get("avg_profit", 0) > TOTAL_FEE else 0.3
+    return (
+        stats.get("win_rate", 0) * 3 +
+        stats.get("sharpe", 0) * 2 -
+        stats.get("drawdown", 1) * 2
+    ) * trade_bonus * fee_penalty
 
 
 # ══════════════════════════════
-# التشغيل
+# التطور
 # ══════════════════════════════
-if __name__ == "__main__":
-    from features import load_data, extract_features
-    from strategy_generator import generate_population, print_strategy
+def evolve(df, generations=GENERATIONS):
+    print(f"🧬 بدء التطور — {generations} جيل")
+    print("━" * 40)
 
-    print("📊 تحميل البيانات (1m)...")
-    df = load_data(interval="1m")
-    df = extract_features(df)
-    print(f"✅ {len(df)} صف جاهز")
-
-    print(f"\n💰 إعدادات التداول:")
-    print(f" TP: {TP_PCT*100:.2f}%")
-    print(f" SL: {SL_PCT*100:.2f}%")
-    print(f" Fee: {TOTAL_FEE*100:.2f}% (دخول + خروج)")
-    print(f" صافي TP: {(TP_PCT - TOTAL_FEE)*100:.2f}%")
-    print(f" صافي SL: {-(SL_PCT + TOTAL_FEE)*100:.2f}%")
-
-    print("\n🧬 توليد 1000 استراتيجية...")
-    population = generate_population(1000)
-
-    print("\n⚙️ بدء الاختبار...")
-    results = run_backtest(population, df)
-    print(f"✅ نتائج: {len(results)} استراتيجية لها صفقات كافية")
-
-    print("\n🏆 أفضل الاستراتيجيات:")
-    best = filter_best(results)
-
-    if best:
-        for i, r in enumerate(best):
-            print(f"\n{'='*40}")
-            print_strategy(r["strategy"], i)
-            s = r["stats"]
-            print(f" 📊 Win Rate: {s['win_rate']*100:.1f}%")
-            print(f" 💰 Total Profit: {s['total_profit']*100:.2f}%")
-            print(f" ⚡ Profit Factor: {s['profit_factor']}")
-            print(f" 📉 Drawdown: {s['drawdown']*100:.1f}%")
-            print(f" 📈 Sharpe: {s['sharpe']:.2f}")
-            print(f" 🔢 Trades: {s['trades']}")
-            print(f" 💵 Avg Profit: {s['avg_profit']*100:.4f}%")
+    saved = load_best()
+    if saved:
+        saved_score = calc_score(saved["stats"])
+        print(f"📂 تحميل من Redis — Score={saved_score:.2f}")
+        population = [saved["strategy"]]
+        while len(population) < POPULATION_SIZE:
+            population.append(generate_strategy())
     else:
-        print("❌ ما في استراتيجية اجتازت المعايير — نكمل التطوير")
+        saved_score = -999
+        print("🎲 بدء عشوائي...")
+        population = generate_population(POPULATION_SIZE)
+
+    best_ever = None
+    best_score = -999
+
+    for gen in range(generations):
+        print(f"\n🔄 الجيل {gen+1}/{generations}")
+
+        results = run_backtest(population, df)
+
+        if not results:
+            print("⚠️ ما في نتائج — نولد جيل جديد")
+            population = generate_population(POPULATION_SIZE)
+            continue
+
+        results.sort(key=score_result, reverse=True)
+        top = results[:TOP_KEEP]
+
+        best_gen = top[0]
+        gen_score = score_result(best_gen)
+        s = best_gen["stats"]
+
+        print(f" 🏆 Win={s['win_rate']*100:.1f}% | "
+              f"Profit={s['total_profit']*100:.1f}% | "
+              f"Drawdown={s['drawdown']*100:.1f}% | "
+              f"Sharpe={s['sharpe']:.2f} | "
+              f"Trades={s['trades']} | "
+              f"AvgProfit={s['avg_profit']*100:.3f}% | "
+              f"Score={gen_score:.2f}")
+
+        if gen_score > best_score:
+            best_score = gen_score
+            best_ever = best_gen
+            print(f" ⭐ أفضل حتى الآن!")
+
+            if gen_score > saved_score:
+                save_best(best_ever["strategy"], best_ever["stats"])
+                saved_score = gen_score
+                print(f" 💾 أفضل من المحفوظ — تم التحديث ✅")
+            else:
+                print(f" ℹ️ المحفوظ في Redis أفضل — لا تغيير")
+
+        # ══════════════════════════════
+        # الجيل التالي
+        # ══════════════════════════════
+        new_population = [r["strategy"] for r in top]
+
+        # 50% mutation
+        while len(new_population) < int(POPULATION_SIZE * 0.5):
+            parent = random.choice(top)["strategy"]
+            new_population.append(mutate(parent))
+
+        # 30% crossover
+        while len(new_population) < int(POPULATION_SIZE * 0.8):
+            p1 = random.choice(top)["strategy"]
+            p2 = random.choice(top)["strategy"]
+            new_population.append(crossover(p1, p2))
+
+        # 20% عشوائي جديد
+        while len(new_population) < POPULATION_SIZE:
+            new_population.append(generate_strategy())
+
+        population = new_population
+
+    return best_ever
 
