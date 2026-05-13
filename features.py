@@ -166,6 +166,11 @@ def extract_all_features(dfs: dict) -> pd.DataFrame:
     last_5m = feat_5m.iloc[-1]
     last_15m = feat_15m.iloc[-1]
 
+    # نضيف أعمدة السعر الأساسية من 1m
+    for col in ["open", "high", "low", "close", "volume"]:
+        if col in dfs["1m"].columns:
+            feat_1m[col] = dfs["1m"][col].iloc[-len(feat_1m):].values
+
     # نضيف الـ context للـ 1m
     for col in last_5m.index:
         feat_1m[col] = last_5m[col]
