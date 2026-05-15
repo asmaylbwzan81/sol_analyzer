@@ -1,50 +1,129 @@
 import requests
 import os
 import time
+import sqlite3
+from dotenv import load_dotenv
+
+load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-
 MIN_CONFIDENCE_FOR_REVIEW = 0.75
+DB = "ai_feedback.db"
 
+# ══════════════════════════════
+# DB INIT
+# ══════════════════════════════
+def init_db():
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS ai_feedback (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        verdict TEXT,
+        profit REAL,
+        correct INTEGER
+    )
+    """)
+    conn.commit()
+    conn.close()
 
-# ══════════════════════════════════════════════════════════════
-# 🧠 الدالة المشتركة: تجهيز البيانات
-# ══════════════════════════════════════════════════════════════
-def _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h):
-    if not scores_1d or not scores_4h or not scores_1h:
-        ind_1h = ind_4h = ind_1d = {k: round(v, 2) for k, v in scores.items()}
-    else:
-        ind_1h = {k: round(v, 2) for k, v in scores_1h.items()}
-        ind_4h = {k: round(v, 2) for k, v in scores_4h.items()}
-        ind_1d = {k: round(v, 2) for k, v in scores_1d.items()}
+# ══════════════════════════════
+# تسجيل نتيجة AI
+# ══════════════════════════════
+def log_ai_decision(verdict, profit, expected_direction, actual_direction):
+    try:
+        profit = float(profit or 0.0)
+        correct = 1 if (expected_direction == actual_direction and profit > 0) else 0
+        conn = sqlite3.connect(DB)
+        c = conn.cursor()
+        c.execute("INSERT INTO ai_feedback (verdict, profit, correct) VALUES (?, ?, ?)",
+                  (verdict, profit, correct))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"❌ AI log error: {e}")
 
-    def extract(ind):
-        return {
-            "rsi": ind.get("rsi", 0.5),
-            "chop": ind.get("chop", 0.5), # ✅ بدل adx
-            "hma": ind.get("hma", 0.5), # ✅ بدل ema
-            "macd": ind.get("macd", 0.5),
-            "volume": ind.get("volume", 0.5),
-        }
+# ══════════════════════════════
+# دقة AI
+# ══════════════════════════════
+def get_ai_accuracy(window=100):
+    try:
+        conn = sqlite3.connect(DB)
+        c = conn.cursor()
+        c.execute("SELECT correct FROM ai_feedback ORDER BY id DESC LIMIT ?", (window,))
+        rows = c.fetchall()
+        conn.close()
+        if not rows:
+            return 0.5
+        return float(max(0.0, min(1.0, sum(r[0] for r in rows) / len(rows))))
+    except:
+        return 0.5
 
-    return extract(ind_1h), extract(ind_4h), extract(ind_1d)
+def get_ai_penalty(window=100):
+    return max(0.0, min(1.0, 1.0 - get_ai_accuracy(window)))
 
+def adjust_ai_weight(base_weight=0.25, window=100):
+    penalty = get_ai_penalty(window)
+    return {
+        "base_weight": base_weight,
+        "accuracy": 1.0 - penalty,
+        "penalty": penalty,
+        "final_weight": base_weight * (1.0 - penalty * 0.8)
+    }
 
-# ══════════════════════════════════════════════════════════════
-# 📝 بناء الـ Prompt
-# ══════════════════════════════════════════════════════════════
-def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None, second_layer=False):
-    note = "(هذه المراجعة الثانية — Groq وافق بالفعل، أنت الحكم الأخير)\n" if second_layer else ""
+# ══════════════════════════════
+# تجهيز البيانات من Features الجديدة
+# ══════════════════════════════
+def _prepare_features(row):
+    def g(key, default=0.5):
+        val = row.get(key, default)
+        if val is None or (isinstance(val, float) and (val != val)):
+            return default
+        return round(float(val), 4)
+
+    return {
+        "1m": {
+            "zscore": g("1m_zscore"),
+            "momentum_pct": g("1m_momentum_pct"),
+            "volatility": g("1m_volatility"),
+            "entropy": g("1m_entropy"),
+            "autocorr": g("1m_autocorr_1"),
+            "hist_prob_up": g("1m_hist_prob_up"),
+            "vol_ratio": g("1m_vol_ratio"),
+            "mean_reversion": g("1m_mean_reversion"),
+        },
+        "5m": {
+            "zscore": g("5m_zscore"),
+            "momentum_pct": g("5m_momentum_pct"),
+            "volatility": g("5m_volatility"),
+            "hist_prob_up": g("5m_hist_prob_up"),
+        },
+        "15m": {
+            "zscore": g("15m_zscore"),
+            "momentum_pct": g("15m_momentum_pct"),
+            "volatility": g("15m_volatility"),
+            "hist_prob_up": g("15m_hist_prob_up"),
+        },
+    }
+
+# ══════════════════════════════
+# بناء الـ Prompt
+# ══════════════════════════════
+def _build_prompt(price, direction, final_score, features, pattern_stats=None, second_layer=False):
+    note = "(هذه المراجعة الثانية — الذكاء الأول وافق، أنت الحكم الأخير)\n" if second_layer else ""
 
     if pattern_stats and pattern_stats.get("total", 0) > 0:
-        history_line = f"📊 السجل التاريخي: {pattern_stats['text']} — خذه بعين الاعتبار مع التحليل"
-        history_rule = "- إذا كان السجل التاريخي إيجابياً (فوق 60%) = عامل داعم للدخول"
-        history_rule += "\n- إذا كان السجل التاريخي سلبياً (تحت 40%) = عامل ضد الدخول"
+        history_line = f"📊 السجل التاريخي: {pattern_stats['text']}"
+        history_rule = "- سجل إيجابي فوق 60% = عامل داعم | سلبي تحت 40% = عامل ضد"
     else:
-        history_line = "📊 السجل التاريخي: لا يوجد سجل بعد — قرر بناءً على المؤشرات فقط ولا ترفض بسبب غياب التاريخ"
-        history_rule = "- لا يوجد سجل تاريخي — ركز على المؤشرات التقنية فقط"
+        history_line = "📊 السجل التاريخي: لا يوجد — قرر بناءً على الـ Features فقط"
+        history_rule = "- لا سجل تاريخي — ركز على الـ Features الإحصائية"
 
-    return f"""أنت محلل تداول خبير ومتحفظ. مهمتك مراجعة صفقة اجتازت فلاتر صارمة.
+    f1 = features["1m"]
+    f5 = features["5m"]
+    f15 = features["15m"]
+
+    return f"""أنت محلل Quant خبير. مهمتك مراجعة صفقة اجتازت فلاتر إحصائية صارمة.
 {note}
 السعر: {price}
 الاتجاه: {direction}
@@ -52,45 +131,46 @@ def _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_st
 
 {history_line}
 
-📊 مؤشرات الساعة (1H):
-- RSI: {tf_1h['rsi']} | CHOP: {tf_1h['chop']}
-- HMA: {tf_1h['hma']} | MACD: {tf_1h['macd']}
-- Volume: {tf_1h['volume']}
+📊 Features الفريم 1m (الدخول):
+- Z-Score: {f1['zscore']} | Mean Reversion: {f1['mean_reversion']}
+- Momentum%: {f1['momentum_pct']} | Entropy: {f1['entropy']}
+- Volatility: {f1['volatility']} | Vol Ratio: {f1['vol_ratio']}
+- Autocorr: {f1['autocorr']} | Hist Prob Up: {f1['hist_prob_up']}
 
-📊 مؤشرات 4 ساعات (4H):
-- RSI: {tf_4h['rsi']} | CHOP: {tf_4h['chop']}
-- HMA: {tf_4h['hma']} | MACD: {tf_4h['macd']}
+📊 Features الفريم 5m (التأكيد):
+- Z-Score: {f5['zscore']} | Momentum%: {f5['momentum_pct']}
+- Volatility: {f5['volatility']} | Hist Prob Up: {f5['hist_prob_up']}
 
-📊 مؤشرات يومي (1D):
-- RSI: {tf_1d['rsi']} | CHOP: {tf_1d['chop']}
-- HMA: {tf_1d['hma']} | MACD: {tf_1d['macd']}
+📊 Features الفريم 15m (الاتجاه العام):
+- Z-Score: {f15['zscore']} | Momentum%: {f15['momentum_pct']}
+- Volatility: {f15['volatility']} | Hist Prob Up: {f15['hist_prob_up']}
 
-قواعد (القيم بين 0-1):
-- RSI < 0.35 = تشبع بيع → LONG | RSI > 0.65 = تشبع شراء → SHORT
-- HMA > 0.5 = صاعد | HMA < 0.5 = هابط
-- CHOP > 0.6 = ترند قوي | CHOP < 0.4 = سوق متذبذب
-- MACD > 0.5 = زخم صاعد | MACD < 0.5 = هابط
+قواعد التحليل:
+- Z-Score > 2 = تشبع شراء → SHORT | Z-Score < -2 = تشبع بيع → LONG
+- Mean Reversion < -1 = السعر تحت المتوسط → LONG محتمل
+- Momentum% > 0 = زخم صاعد | < 0 = زخم هابط
+- Hist Prob Up > 0.55 = احتمال صعود تاريخي عالي
+- Entropy عالي = سوق فوضوي → تحذير
+- Vol Ratio > 1.5 = تقلب غير طبيعي → تحذير
 {history_rule}
 
-يجب أن تجيب بهذا الشكل بالضبط (3 أسطر فقط باللغة العربية):
+أجب بهذا الشكل بالضبط (3 أسطر فقط):
 VERDICT: APPROVE أو REJECT
 REASON: سبب قصير بالعربي
 ADVICE: نصيحة واحدة بالعربي
 
 قواعد القرار:
-- APPROVE: 3 إطارات متوافقة والاتجاه واضح
-- REJECT: تضارب بين الإطارات أو CHOP ضعيف
+- APPROVE: الـ Features متوافقة مع الاتجاه في الفريمات الثلاثة
+- REJECT: تضارب بين الفريمات أو entropy عالي أو vol ratio مرتفع جداً
 - كن صارماً — حماية الرصيد أولاً
-- أجب بالعربية فقط
 """
 
-
-# ══════════════════════════════════════════════════════════════
-# 🔍 تحليل الرد (مشترك)
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════
+# تحليل الرد
+# ══════════════════════════════
 def _parse_response(text):
     if not text:
-        return "REJECT", "رد فارغ من الذكاء", ""
+        return "REJECT", "رد فارغ", ""
     verdict = "APPROVE"
     reason = ""
     advice = ""
@@ -105,138 +185,96 @@ def _parse_response(text):
             advice = line.replace("ADVICE:", "").strip()
     return verdict, reason, advice
 
-
-# ══════════════════════════════════════════════════════════════
-# 🤖 الذكاء الأول: Groq — Llama 3.1 8B (سريع)
-# ══════════════════════════════════════════════════════════════
-def _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
+# ══════════════════════════════
+# Groq - Llama 3.1 8B
+# ══════════════════════════════
+def _review_groq(price, direction, final_score, features, pattern_stats=None):
     if not GROQ_API_KEY:
         return "REJECT", "لا يوجد Groq API Key", ""
 
-    prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats, second_layer=False)
+    prompt = _build_prompt(price, direction, final_score, features, pattern_stats, second_layer=False)
     deadline = time.time() + 30
 
     while time.time() < deadline:
         try:
-            remaining = deadline - time.time()
             res = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "llama-3.1-8b-instant",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 150
-                },
-                timeout=min(remaining, 10)
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": prompt}], "max_tokens": 150},
+                timeout=min(deadline - time.time(), 10)
             )
-
             if res.status_code == 429:
-                print("⏳ Groq: rate limit — انتظار 5 ثواني...")
                 time.sleep(5)
                 continue
-
             data = res.json()
             if "choices" not in data:
-                return "REJECT", f"خطأ: {data.get('error', {}).get('message', 'خطأ غير معروف')}", ""
-
+                return "REJECT", f"خطأ: {data.get('error', {}).get('message', '')}", ""
             text = data["choices"][0]["message"]["content"]
             verdict, reason, advice = _parse_response(text)
             print(f"🤖 Groq → {verdict} | {reason}")
             return verdict, reason, advice
-
         except requests.exceptions.Timeout:
-            print("⏰ Groq timeout — إعادة المحاولة...")
             continue
         except Exception as e:
-            print(f"❌ Groq Error: {e}")
-            return "REJECT", f"خطأ في Groq: {e}", ""
+            return "REJECT", f"خطأ Groq: {e}", ""
 
-    print("⏰ Groq انتهى وقته — رُفضت الصفقة")
-    return "REJECT", "لم يرد Groq خلال 30 ثانية", ""
+    return "REJECT", "Groq timeout", ""
 
-
-# ══════════════════════════════════════════════════════════════
-# 🦙 الذكاء الثاني: Groq — Llama 3.3 70B (أقوى)
-# ══════════════════════════════════════════════════════════════
-def _review_llama70(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=None):
+# ══════════════════════════════
+# Groq - Llama 3.3 70B
+# ══════════════════════════════
+def _review_llama70(price, direction, final_score, features, pattern_stats=None):
     if not GROQ_API_KEY:
         return "REJECT", "لا يوجد Groq API Key", ""
 
-    prompt = _build_prompt(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats, second_layer=True)
+    prompt = _build_prompt(price, direction, final_score, features, pattern_stats, second_layer=True)
     deadline = time.time() + 40
 
     while time.time() < deadline:
         try:
-            remaining = deadline - time.time()
             res = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "llama-3.3-70b-versatile",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 150
-                },
-                timeout=min(remaining, 15)
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "max_tokens": 150},
+                timeout=min(deadline - time.time(), 15)
             )
-
             if res.status_code == 429:
-                print("⏳ Llama70B: rate limit — انتظار 5 ثواني...")
                 time.sleep(5)
                 continue
-
             data = res.json()
             if "choices" not in data:
-                print(f"⚠️ Llama70B Error: {data}")
-                return "REJECT", "خطأ في Llama 70B", ""
-
+                return "REJECT", "خطأ Llama 70B", ""
             text = data["choices"][0]["message"]["content"]
             verdict, reason, advice = _parse_response(text)
             print(f"🦙 Llama70B → {verdict} | {reason}")
             return verdict, reason, advice
-
         except requests.exceptions.Timeout:
-            print("⏰ Llama70B timeout — إعادة المحاولة...")
             continue
         except Exception as e:
-            print(f"❌ Llama70B Error: {e}")
-            return "REJECT", f"خطأ في Llama 70B: {e}", ""
+            return "REJECT", f"خطأ Llama70B: {e}", ""
 
-    print("⏰ Llama70B انتهى وقته — رُفضت الصفقة")
-    return "REJECT", "لم يرد Llama 70B خلال 40 ثانية", ""
+    return "REJECT", "Llama70B timeout", ""
 
-
-# ══════════════════════════════════════════════════════════════
-# 🚀 الدالة الرئيسية — تسلسل ✅
-# ══════════════════════════════════════════════════════════════
-def review(scores, final_score, direction, price,
-           scores_1d=None, scores_4h=None, scores_1h=None, pattern_stats=None):
+# ══════════════════════════════
+# الدالة الرئيسية
+# ══════════════════════════════
+def review(row, final_score, direction, price, pattern_stats=None):
     if final_score < MIN_CONFIDENCE_FOR_REVIEW:
-        print(f"⏭️ AI Review تخطى — confidence={round(final_score,2)} أقل من {MIN_CONFIDENCE_FOR_REVIEW}")
-        return "APPROVE", f"ثقة منخفضة ({round(final_score,2)}) — تم القبول التلقائي", "", ""
+        return "APPROVE", f"ثقة منخفضة ({round(final_score,2)}) — قبول تلقائي", "", ""
 
     if direction not in ("LONG", "SHORT"):
         return "REJECT", "اتجاه غير واضح", "", ""
 
-    tf_1h, tf_4h, tf_1d = _prepare_timeframes(scores, scores_1d, scores_4h, scores_1h)
+    features = _prepare_features(row)
 
-    # ── الذكاء الأول: Groq ───────────────────
-    groq_verdict, groq_reason, _ = _review_groq(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
+    groq_verdict, groq_reason, _ = _review_groq(price, direction, final_score, features, pattern_stats)
 
     if groq_verdict == "REJECT":
-        print(f"🤖 Groq رفض — ما يوصل Llama 70B")
         return "REJECT", f"🤖 Groq رفض: {groq_reason}", groq_reason, ""
 
-    # ── الذكاء الثاني: Llama 70B ─────────────
-    or_verdict, or_reason, _ = _review_llama70(price, direction, final_score, tf_1h, tf_4h, tf_1d, pattern_stats=pattern_stats)
+    llama_verdict, llama_reason, _ = _review_llama70(price, direction, final_score, features, pattern_stats)
 
-    if or_verdict == "REJECT":
-        return "REJECT", f"🦙 Llama رفض: {or_reason}", groq_reason, or_reason
+    if llama_verdict == "REJECT":
+        return "REJECT", f"🦙 Llama رفض: {llama_reason}", groq_reason, llama_reason
 
-    return "APPROVE", "✅ Groq + Llama وافقا", groq_reason, or_reason
-
+    return "APPROVE", "✅ Groq + Llama وافقا", groq_reason, llama_reason
