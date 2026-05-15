@@ -3,10 +3,9 @@ import numpy as np
 from features import ALL_FEATURES, BASE_FEATURES
 
 # ══════════════════════════════
-# الـ Features المتاحة (78 feature من 3 فريمات)
+# Features
 # ══════════════════════════════
 FEATURES = ALL_FEATURES
-
 OPERATORS = [">", "<"]
 
 # ══════════════════════════════
@@ -41,98 +40,240 @@ BASE_RANGES = {
     "close_position": (0.0, 1.0),
 }
 
-# نبني RANGES للـ 3 فريمات
 RANGES = {}
 for prefix in ["1m_", "5m_", "15m_"]:
     for feature, range_val in BASE_RANGES.items():
         RANGES[f"{prefix}{feature}"] = range_val
 
+# ══════════════════════════════
+# Types
+# ══════════════════════════════
+STRATEGY_TYPES = [
+    "mean_reversion",
+    "momentum",
+    "breakout",
+    "volatility_burst",
+    "momentum_exhaustion",
+]
 
 # ══════════════════════════════
-# توليد استراتيجية واحدة
+# Condition generator
 # ══════════════════════════════
-def generate_strategy():
-    """
-    يولد استراتيجية بـ 3 شروط:
-    - شرط من 1m (دخول دقيق)
-    - شرط من 5m (تأكيد)
-    - شرط من 15m (اتجاه عام)
-    """
+def generate_condition(prefix=None):
+    if prefix:
+        available = [f for f in FEATURES if f.startswith(prefix)]
+    else:
+        available = FEATURES
+
+    feature = random.choice(available)
+    operator = random.choice(OPERATORS)
+
+    low, high = RANGES.get(feature, (0, 1))
+    threshold = round(random.uniform(low, high), 6)
+
+    return {
+        "feature": feature,
+        "operator": operator,
+        "threshold": threshold
+    }
+
+# ══════════════════════════════
+# Typed strategies
+# ══════════════════════════════
+def generate_typed_strategy(strategy_type):
     conditions = []
 
-    # شرط من كل فريم
-    for prefix in ["1m_", "5m_", "15m_"]:
-        prefix_features = [f for f in FEATURES if f.startswith(prefix)]
-        feature = random.choice(prefix_features)
-        operator = random.choice(OPERATORS)
-        low, high = RANGES[feature]
-        threshold = round(random.uniform(low, high), 6)
+    if strategy_type == "mean_reversion":
+        z = round(random.uniform(-2.5, 2.5), 6)
+
         conditions.append({
-            "feature": feature,
-            "operator": operator,
-            "threshold": threshold
+            "feature": "1m_zscore",
+            "operator": ">" if z > 0 else "<",
+            "threshold": abs(z)
         })
 
-    # شرط إضافي عشوائي من أي فريم
-    extra_feature = random.choice(FEATURES)
-    low, high = RANGES[extra_feature]
-    conditions.append({
-        "feature": extra_feature,
-        "operator": random.choice(OPERATORS),
-        "threshold": round(random.uniform(low, high), 6)
-    })
+        conditions.append({
+            "feature": "1m_mean_reversion",
+            "operator": "<",
+            "threshold": round(random.uniform(-1.0, 0.0), 6)
+        })
+
+        conditions.append(generate_condition("5m_"))
+
+        # FIXED direction logic
+        direction = "SHORT" if z > 0 else "LONG"
+
+    elif strategy_type == "momentum":
+        op = random.choice([">", "<"])
+
+        conditions.append({
+            "feature": "1m_momentum_pct",
+            "operator": op,
+            "threshold": round(random.uniform(0.001, 0.003), 6)
+        })
+
+        conditions.append({
+            "feature": "5m_momentum_pct",
+            "operator": op,
+            "threshold": round(random.uniform(0.001, 0.005), 6)
+        })
+
+        conditions.append(generate_condition("15m_"))
+
+        direction = "LONG" if op == ">" else "SHORT"
+
+    elif strategy_type == "breakout":
+        op = random.choice([">", "<"])
+
+        conditions.append({
+            "feature": "1m_percentile_rank",
+            "operator": op,
+            "threshold": round(random.uniform(0.7, 0.95), 6)
+        })
+
+        conditions.append({
+            "feature": "1m_volume_zscore",
+            "operator": ">",
+            "threshold": round(random.uniform(0.5, 2.0), 6)
+        })
+
+        conditions.append(generate_condition("5m_"))
+
+        direction = "LONG" if op == ">" else "SHORT"
+
+    elif strategy_type == "volatility_burst":
+        conditions.append({
+            "feature": "1m_vol_ratio",
+            "operator": ">",
+            "threshold": round(random.uniform(1.5, 2.5), 6)
+        })
+
+        conditions.append({
+            "feature": "1m_entropy",
+            "operator": ">",
+            "threshold": round(random.uniform(1.5, 2.5), 6)
+        })
+
+        conditions.append(generate_condition("1m_"))
+
+        direction = random.choice(["LONG", "SHORT"])
+
+    elif strategy_type == "momentum_exhaustion":
+        conditions.append({
+            "feature": "1m_acceleration",
+            "operator": "<",
+            "threshold": round(random.uniform(-200, 0), 6)
+        })
+
+        conditions.append({
+            "feature": "1m_momentum_pct",
+            "operator": ">",
+            "threshold": round(random.uniform(0.01, 0.03), 6)
+        })
+
+        conditions.append(generate_condition("5m_"))
+
+        direction = "SHORT"
+
+    else:
+        return generate_random_strategy()
+
+    conditions.append(generate_condition())
 
     return {
         "conditions": conditions,
-        "direction": random.choice(["LONG", "SHORT"])
+        "direction": direction,
+        "type": strategy_type,
+        "profile": {
+            "edge_type": strategy_type,
+            "regime_preference": get_regime_preference(strategy_type),
+            "volatility_sensitivity": get_vol_sensitivity(strategy_type),
+        }
     }
 
+# ══════════════════════════════
+# Helpers
+# ══════════════════════════════
+def get_regime_preference(strategy_type):
+    return {
+        "mean_reversion": "ranging",
+        "momentum": "trending",
+        "breakout": "low_volatility",
+        "volatility_burst": "high_volatility",
+        "momentum_exhaustion": "trending",
+    }.get(strategy_type, "any")
+
+
+def get_vol_sensitivity(strategy_type):
+    return {
+        "mean_reversion": "low",
+        "momentum": "medium",
+        "breakout": "medium",
+        "volatility_burst": "high",
+        "momentum_exhaustion": "low",
+    }.get(strategy_type, "medium")
 
 # ══════════════════════════════
-# تطبيق الاستراتيجية على صف
+# Random strategy
+# ══════════════════════════════
+def generate_random_strategy():
+    conditions = []
+
+    for prefix in ["1m_", "5m_", "15m_"]:
+        conditions.append(generate_condition(prefix))
+
+    conditions.append(generate_condition())
+
+    return {
+        "conditions": conditions,
+        "direction": random.choice(["LONG", "SHORT"]),
+        "type": "random",
+        "profile": {
+            "edge_type": "random",
+            "regime_preference": "any",
+            "volatility_sensitivity": "medium",
+        }
+    }
+
+# ══════════════════════════════
+# Apply strategy
 # ══════════════════════════════
 def apply_strategy(strategy, row):
     for cond in strategy["conditions"]:
         val = row.get(cond["feature"])
+
         if val is None or (isinstance(val, float) and np.isnan(val)):
-            return False
+            continue # FIX: don't kill strategy
+
         if cond["operator"] == ">" and not (val > cond["threshold"]):
             return False
         if cond["operator"] == "<" and not (val < cond["threshold"]):
             return False
+
     return True
 
+# ══════════════════════════════
+# Confidence (fixed normalization)
+# ══════════════════════════════
+def strategy_confidence(strategy, row):
+    scores = []
 
-# ══════════════════════════════
-# توليد N استراتيجية
-# ══════════════════════════════
-def generate_population(n=300):
-    return [generate_strategy() for _ in range(n)]
-
-
-# ══════════════════════════════
-# طباعة استراتيجية
-# ══════════════════════════════
-def print_strategy(strategy, index=0):
-    print(f"\n📋 استراتيجية {index+1} — {strategy['direction']}")
     for cond in strategy["conditions"]:
-        print(f" {cond['feature']} {cond['operator']} {cond['threshold']}")
+        val = row.get(cond["feature"])
 
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            scores.append(0.0)
+            continue
 
-# ══════════════════════════════
-# التشغيل
-# ══════════════════════════════
-if __name__ == "__main__":
-    print("🧬 توليد 300 استراتيجية...")
-    population = generate_population(300)
+        low, high = RANGES.get(cond["feature"], (0, 1))
+        rng = high - low + 1e-10
 
-    print("\n📋 أمثلة (أول 3):")
-    for i, s in enumerate(population[:3]):
-        print_strategy(s, i)
+        if cond["operator"] == ">" and val > cond["threshold"]:
+            scores.append(min(1.0, (val - cond["threshold"]) / rng))
+        elif cond["operator"] == "<" and val < cond["threshold"]:
+            scores.append(min(1.0, (cond["threshold"] - val) / rng))
+        else:
+            scores.append(0.0)
 
-    print(f"\n✅ تم توليد {len(population)} استراتيجية")
-    print(f"📊 عدد الـ Features المتاحة: {len(FEATURES)}")
-    print(f" 1m: {len([f for f in FEATURES if f.startswith('1m_')])} feature")
-    print(f" 5m: {len([f for f in FEATURES if f.startswith('5m_')])} feature")
-    print(f" 15m: {len([f for f in FEATURES if f.startswith('15m_')])} feature")
-
+    confidence = float(np.mean(scores)) if scores else 0.0
+    passed = sum(1 for s in
