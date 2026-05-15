@@ -4,13 +4,18 @@ from scipy import stats
 from scipy.fft import fft
 
 # ══════════════════════════════
-# Entropy
+# Entropy - FIXED
 # ══════════════════════════════
 def entropy(arr):
-    hist = np.histogram(arr, bins=10, density=True)[0]
-    hist = hist[hist > 0]
-    return -np.sum(hist * np.log(hist))
-
+    if len(arr) < 2:
+        return 0.0
+    arr = arr[~np.isnan(arr)]
+    if len(arr) < 2:
+        return 0.0
+    hist, _ = np.histogram(arr, bins=10)
+    hist = hist[hist > 0].astype(float)
+    hist /= hist.sum()
+    return float(-np.sum(hist * np.log(hist + 1e-10)))
 
 # ══════════════════════════════
 # FFT
@@ -18,7 +23,6 @@ def entropy(arr):
 def fourier_strength(arr):
     f = np.abs(fft(arr)[1:len(arr)//2])
     return f.max() / (f.mean() + 1e-10)
-
 
 # ══════════════════════════════
 # Autocorrelation
@@ -29,7 +33,6 @@ def autocorr(x, lag=1):
     x1 = x[:-lag]
     x2 = x[lag:]
     return np.corrcoef(x1, x2)[0, 1]
-
 
 # ══════════════════════════════
 # استخراج Features لفريم واحد
@@ -45,9 +48,6 @@ def extract_features_single(df, prefix=""):
 
     features = {}
 
-    # ────────────────────────
-    # 📐 Statistical Layer
-    # ────────────────────────
     features[f"{prefix}returns"] = returns
 
     features[f"{prefix}zscore"] = (
@@ -73,9 +73,6 @@ def extract_features_single(df, prefix=""):
     features[f"{prefix}skewness"] = returns.rolling(20).skew()
     features[f"{prefix}kurtosis"] = returns.rolling(20).kurt()
 
-    # ────────────────────────
-    # 🌊 Momentum Layer
-    # ────────────────────────
     features[f"{prefix}momentum_5"] = close - close.shift(5)
     features[f"{prefix}momentum_10"] = close - close.shift(10)
     features[f"{prefix}momentum_20"] = close - close.shift(20)
@@ -86,9 +83,6 @@ def extract_features_single(df, prefix=""):
         features[f"{prefix}momentum_10"].shift(5)
     )
 
-    # ────────────────────────
-    # 📊 Probability Layer
-    # ────────────────────────
     features[f"{prefix}hist_prob_up"] = returns.rolling(50).apply(
         lambda x: (x > 0).mean(), raw=True
     )
@@ -101,9 +95,6 @@ def extract_features_single(df, prefix=""):
         lambda x: stats.percentileofscore(x, x[-1]) / 100, raw=True
     )
 
-    # ────────────────────────
-    # 🔢 Advanced Analytics
-    # ────────────────────────
     features[f"{prefix}autocorr_1"] = returns.rolling(30).apply(
         lambda x: autocorr(x, 1), raw=True
     )
@@ -119,9 +110,6 @@ def extract_features_single(df, prefix=""):
         entropy, raw=True
     )
 
-    # ────────────────────────
-    # 📈 Market State
-    # ────────────────────────
     features[f"{prefix}volatility"] = std20
     features[f"{prefix}vol_ratio"] = std20 / (std50 + 1e-10)
 
@@ -136,42 +124,26 @@ def extract_features_single(df, prefix=""):
 
     return pd.DataFrame(features)
 
-
 # ══════════════════════════════
 # استخراج Features لـ 3 فريمات
 # ══════════════════════════════
 def extract_all_features(dfs: dict) -> pd.DataFrame:
-    """
-    dfs = {
-        "1m": df_1m,
-        "5m": df_5m,
-        "15m": df_15m,
-    }
-    يرجع DataFrame موحد مبني على آخر شمعة 1m
-    """
-
-    # استخراج features لكل فريم
     feat_1m = extract_features_single(dfs["1m"], prefix="1m_")
     feat_5m = extract_features_single(dfs["5m"], prefix="5m_")
     feat_15m = extract_features_single(dfs["15m"], prefix="15m_")
 
-    # تنظيف كل فريم
     for feat in [feat_1m, feat_5m, feat_15m]:
         feat.replace([np.inf, -np.inf], np.nan, inplace=True)
         feat.dropna(inplace=True)
         feat.reset_index(drop=True, inplace=True)
 
-    # نأخذ آخر صف من 5m و 15m كـ context ثابت
-    # ونضيفه على كل صف من 1m
     last_5m = feat_5m.iloc[-1]
     last_15m = feat_15m.iloc[-1]
 
-    # نضيف أعمدة السعر الأساسية من 1m
     for col in ["open", "high", "low", "close", "volume"]:
         if col in dfs["1m"].columns:
             feat_1m[col] = dfs["1m"][col].iloc[-len(feat_1m):].values
 
-    # نضيف الـ context للـ 1m
     for col in last_5m.index:
         feat_1m[col] = last_5m[col]
 
@@ -184,36 +156,26 @@ def extract_all_features(dfs: dict) -> pd.DataFrame:
 
     return feat_1m
 
-
 # ══════════════════════════════
-# للتوافق مع الكود القديم (فريم وحيد)
+# للتوافق مع الكود القديم
 # ══════════════════════════════
 def extract_features(df):
-    """للاستخدام مع فريم وحيد - للتوافق مع backtester و validator"""
-    prefix = ""
     feat = extract_features_single(df, prefix="")
     df = df.copy()
     for col in feat.columns:
         df[col] = feat[col].values
-
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df.dropna(inplace=True)
     df.reset_index(drop=True, inplace=True)
     return df
 
-
 def load_data(symbol="BTC-USDT", interval="1m"):
-    """تحميل بيانات من قاعدة البيانات"""
     import sqlite3
     import os
-
     DB_PATH = "market_data.db"
-
     if not os.path.exists(DB_PATH):
-        print("📥 DB ما موجودة، جاري جلب البيانات...")
         from data_engine import init_all_timeframes
         init_all_timeframes()
-
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query('''
         SELECT timestamp, open, high, low, close, volume
@@ -223,7 +185,6 @@ def load_data(symbol="BTC-USDT", interval="1m"):
     ''', conn, params=(symbol, interval))
     conn.close()
     return df
-
 
 # ══════════════════════════════
 # قائمة كل الـ Features
@@ -247,25 +208,3 @@ ALL_FEATURES = (
     [f"5m_{f}" for f in BASE_FEATURES] +
     [f"15m_{f}" for f in BASE_FEATURES]
 )
-
-
-# ══════════════════════════════
-# تشغيل
-# ══════════════════════════════
-if __name__ == "__main__":
-    from data_engine import load_all_timeframes, init_all_timeframes
-
-    print("🚀 تحميل الفريمات...")
-    init_all_timeframes()
-    dfs = load_all_timeframes()
-
-    print("\n⚙️ استخراج الـ Features...")
-    df_features = extract_all_features(dfs)
-
-    print(f"\n✅ عدد الصفوف: {len(df_features)}")
-    print(f"✅ عدد الـ Features: {len(df_features.columns)}")
-    print(f"\n📋 Features (أول 10):")
-    print(list(df_features.columns)[:10])
-    print(f"\n📊 إحصائيات:")
-    print(df_features.describe().round(4))
-
