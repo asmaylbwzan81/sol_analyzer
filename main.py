@@ -1,22 +1,27 @@
 import time
 import threading
 import traceback
+import json
 from datetime import datetime
+
 from data_engine import init_all_timeframes, load_all_timeframes, count_candles
 from features import extract_all_features
 from evolution import evolve
-from strategy_generator import print_strategy
+from strategy_generator import print_strategy, apply_strategy
 from redis_store import load_best
 from news_filter import should_trade
 
 # ══════════════════════════════
-# إعدادات
+# Config
 # ══════════════════════════════
 SYMBOL = "BTC-USDT"
 MAX_OPEN_TRADES = 5
 CAPITAL_PER_TRADE = 10
 LEVERAGE = 3
 EVOLVE_INTERVAL = 60
+
+ERROR_LOG_FILE = "error_log.jsonl"
+
 TARGET_CANDLES = {
     "1m": 50000,
     "5m": 20000,
@@ -24,7 +29,7 @@ TARGET_CANDLES = {
 }
 
 # ══════════════════════════════
-# حالة النظام
+# State
 # ══════════════════════════════
 open_trades = []
 best_strategy = None
@@ -32,79 +37,112 @@ lock = threading.Lock()
 
 
 # ══════════════════════════════
-# تحميل البيانات
+# Error tracker (NEW)
+# ══════════════════════════════
+def log_error(context, error):
+    err_data = {
+        "time": datetime.now().isoformat(),
+        "context": context,
+        "error": str(error),
+        "traceback": traceback.format_exc()
+    }
+
+    print(f"❌ [{context}] {error}")
+
+    try:
+        with open(ERROR_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(err_data, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"⚠️ Failed to write error log: {e}")
+
+
+# ══════════════════════════════
+# Data prep
 # ══════════════════════════════
 def prepare_data():
-    print("📊 فحص قاعدة البيانات...")
-    init_all_timeframes(SYMBOL)
+    try:
+        print("📊 Checking database...")
 
-    for interval, target in TARGET_CANDLES.items():
-        count = count_candles(SYMBOL, interval)
-        print(f" ✅ {interval}: {count} شمعة")
+        init_all_timeframes(SYMBOL)
 
-    print("\n📐 تحميل الفريمات...")
-    dfs = load_all_timeframes(SYMBOL)
+        for interval in TARGET_CANDLES:
+            count = count_candles(SYMBOL, interval)
+            print(f" ✅ {interval}: {count} candles")
 
-    print("⚙️ استخراج الـ Features...")
-    df_features = extract_all_features(dfs)
-    print(f"✅ {len(df_features)} صف | {len(df_features.columns)} feature")
+        print("\n📐 Loading timeframes...")
+        dfs = load_all_timeframes(SYMBOL)
 
-    return df_features
+        print("⚙️ Extracting features...")
+        df_features = extract_all_features(dfs)
+
+        print(f"✅ {len(df_features)} rows | {len(df_features.columns)} features")
+
+        return df_features
+
+    except Exception as e:
+        log_error("prepare_data", e)
+        return None
 
 
 # ══════════════════════════════
-# حلقة التطور
+# Evolution loop
 # ══════════════════════════════
 def evolution_loop(df):
     global best_strategy
 
     round_num = 1
+
     while True:
         try:
             print(f"\n{'═'*40}")
-            print(f"🧬 دورة التطور {round_num} — {datetime.now().strftime('%H:%M:%S')}")
+            print(f"🧬 Evolution cycle {round_num} — {datetime.now().strftime('%H:%M:%S')}")
             print(f"{'═'*40}")
 
             best = evolve(df)
 
             if best:
                 s = best["stats"]
+
                 with lock:
                     best_strategy = best["strategy"]
 
-                print(f"\n🏆 أفضل الدورة {round_num}:")
+                print("\n🏆 Best strategy:")
                 print_strategy(best["strategy"], 0)
-                print(f" 📊 Win Rate: {s['win_rate']*100:.1f}%")
-                print(f" 💰 Total Profit: {s['total_profit']*100:.2f}%")
-                print(f" 📉 Drawdown: {s['drawdown']*100:.1f}%")
-                print(f" 📈 Sharpe: {s['sharpe']:.2f}")
-                print(f" 🔢 Trades: {s['trades']}")
-                print(f" 💵 Avg Profit: {s['avg_profit']*100:.3f}%")
+
+                print(
+                    f" 📊 WinRate: {s['win_rate']*100:.1f}% | "
+                    f"Profit: {s['total_profit']*100:.2f}% | "
+                    f"DD: {s['drawdown']*100:.1f}% | "
+                    f"Sharpe: {s['sharpe']:.2f} | "
+                    f"Trades: {s['trades']}"
+                )
             else:
-                print("⚠️ ما لاقى استراتيجية بهالدورة")
+                print("⚠️ No valid strategy found")
 
             round_num += 1
-            print(f"\n⏳ انتظار {EVOLVE_INTERVAL//60} دقيقة للدورة القادمة...")
             time.sleep(EVOLVE_INTERVAL)
 
         except Exception as e:
-            print(f"❌ خطأ بـ evolution_loop: {e}")
-            traceback.print_exc()
-            print("🔄 إعادة المحاولة بعد دقيقة...")
+            log_error(f"evolution_loop_gen_{round_num}", e)
             time.sleep(60)
 
 
 # ══════════════════════════════
-# حلقة التداول
+# Trading loop
 # ══════════════════════════════
 def trading_loop():
     global open_trades, best_strategy
 
-    print("\n⚡ حلقة التداول بدأت...")
+    print("\n⚡ Trading loop started...")
+
+    from strategy_generator import apply_strategy
+    from data_engine import load_all_timeframes
+    from features import extract_all_features
 
     while True:
         try:
             trade_ok, reason = should_trade("bitcoin")
+
             if not trade_ok:
                 print(f"🚫 {reason}")
                 time.sleep(60)
@@ -112,34 +150,28 @@ def trading_loop():
 
             with lock:
                 strategy = best_strategy
+                open_count = len(open_trades)
 
             if strategy is None:
                 saved = load_best()
+
                 if saved:
                     strategy = saved["strategy"]
                     with lock:
                         best_strategy = strategy
-                    print("📂 استراتيجية محملة من Redis")
+                    print("📂 Loaded strategy from Redis")
                 else:
-                    print("⏳ انتظار الاستراتيجية الأولى...")
                     time.sleep(30)
                     continue
 
-            with lock:
-                current_open = len(open_trades)
-
-            if current_open >= MAX_OPEN_TRADES:
+            if open_count >= MAX_OPEN_TRADES:
                 time.sleep(5)
                 continue
-
-            from data_engine import load_all_timeframes
-            from features import extract_all_features
-            from strategy_generator import apply_strategy
 
             dfs = load_all_timeframes(SYMBOL)
             df = extract_all_features(dfs)
 
-            if df.empty:
+            if df is None or df.empty:
                 time.sleep(10)
                 continue
 
@@ -148,8 +180,8 @@ def trading_loop():
 
             if signal:
                 direction = strategy["direction"]
-                print(f"\n🚀 إشارة {direction} | {datetime.now().strftime('%H:%M:%S')}")
-                print(f" 💵 ${CAPITAL_PER_TRADE} × {LEVERAGE}x = ${CAPITAL_PER_TRADE * LEVERAGE}")
+
+                print(f"\n🚀 SIGNAL {direction} | {datetime.now().strftime('%H:%M:%S')}")
 
                 with lock:
                     open_trades.append({
@@ -157,13 +189,11 @@ def trading_loop():
                         "time": datetime.now(),
                         "capital": CAPITAL_PER_TRADE
                     })
-                    print(f" 📊 صفقات مفتوحة: {len(open_trades)}/{MAX_OPEN_TRADES}")
 
             time.sleep(10)
 
         except Exception as e:
-            print(f"❌ خطأ بـ trading_loop: {e}")
-            traceback.print_exc()
+            log_error("trading_loop", e)
             time.sleep(30)
 
 
@@ -171,42 +201,37 @@ def trading_loop():
 # Main
 # ══════════════════════════════
 def main():
-    print("🚀 Quant Bot Started — نظام Simons")
-    print("━" * 40)
-    print(f" 💵 رأس المال/صفقة: ${CAPITAL_PER_TRADE}")
-    print(f" ⚡ Leverage: {LEVERAGE}x")
-    print(f" 📊 صفقات متزامنة: {MAX_OPEN_TRADES}")
-    print(f" 💰 قوة شراء/صفقة: ${CAPITAL_PER_TRADE * LEVERAGE}")
+    print("🚀 Quant Bot Started — with Error Tracking")
     print("━" * 40)
 
     df = prepare_data()
 
-    evolution_thread = threading.Thread(
+    if df is None:
+        print("❌ Failed to start — no data")
+        return
+
+    threading.Thread(
         target=evolution_loop,
         args=(df,),
         daemon=True
-    )
-    evolution_thread.start()
-    print("\n🧬 Thread التطور بدأ...")
+    ).start()
 
-    trading_thread = threading.Thread(
+    threading.Thread(
         target=trading_loop,
         daemon=True
-    )
-    trading_thread.start()
-    print("⚡ Thread التداول بدأ...")
+    ).start()
 
-    print("\n✅ النظام شغال — Ctrl+C للإيقاف")
+    print("\n✅ System running")
+
     try:
         while True:
             time.sleep(60)
             with lock:
-                print(f"\n📊 [{datetime.now().strftime('%H:%M:%S')}] "
-                      f"صفقات مفتوحة: {len(open_trades)}/{MAX_OPEN_TRADES}")
+                print(f"📊 Open trades: {len(open_trades)}/{MAX_OPEN_TRADES}")
+
     except KeyboardInterrupt:
-        print("\n🛑 النظام أوقف")
+        print("\n🛑 Stopped")
 
 
 if __name__ == "__main__":
     main()
-
