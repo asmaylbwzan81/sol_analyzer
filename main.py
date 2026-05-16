@@ -12,7 +12,7 @@ from strategy_generator import print_strategy, apply_strategy
 from redis_store import load_best
 from news_filter import should_trade
 import os
-import requests
+from upstash_redis import Redis
 
 # ══════════════════════════════
 # Config
@@ -37,30 +37,24 @@ TARGET_CANDLES = {
 }
 
 # ══════════════════════════════
-# Redis
+# Redis — upstash_redis مثل بوت التنفيذ
 # ══════════════════════════════
-REDIS_URL = os.environ.get("UPSTASH_REDIS_REST_URL")
-REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
-HEADERS = {"Authorization": f"Bearer {REDIS_TOKEN}"}
+redis_client = Redis(
+    url=os.environ.get("UPSTASH_REDIS_REST_URL", ""),
+    token=os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+)
 
 def redis_set(key, value):
     try:
-        # نكتب كـ string عشان upstash_redis يقرأها صح
-        requests.post(
-            f"{REDIS_URL}/set/{key}",
-            headers=HEADERS,
-            json={"value": json.dumps(value)},
-            timeout=5
-        )
+        redis_client.set(key, json.dumps(value))
     except Exception as e:
         print(f"⚠️ Redis set error: {e}")
 
 def redis_get(key):
     try:
-        r = requests.get(f"{REDIS_URL}/get/{key}", headers=HEADERS, timeout=5)
-        result = r.json().get("result")
+        result = redis_client.get(key)
         if result:
-            return json.loads(result)
+            return json.loads(str(result))
     except:
         pass
     return None
