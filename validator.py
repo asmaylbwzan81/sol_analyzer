@@ -1,14 +1,24 @@
+import json
 import numpy as np
 import pandas as pd
 from features import extract_features
 from backtester import backtest_strategy
-from redis_store import load_best
 
 # ══════════════════════════════
 # نختبر استراتيجية BTC على SOL 5m
 # ══════════════════════════════
-SYMBOL = "SOL-USDT" # ← غيرنا لـ SOL
+SYMBOL = "SOL-USDT"
 INTERVAL = "5m"
+
+def load_strategy_from_file():
+    try:
+        with open("s.json", "r") as f:
+            data = json.load(f)
+        print("✅ تم تحميل الاستراتيجية من الملف")
+        return data
+    except Exception as e:
+        print(f"❌ خطأ في قراءة الملف: {e}")
+        return None
 
 def load_new_data(limit=5000):
     import requests
@@ -63,7 +73,7 @@ def validate():
     print("🔍 بدء التحقق — استراتيجية BTC على SOL 1h...")
     print("━" * 40)
 
-    saved = load_best() # ← يقرأ استراتيجية BTC
+    saved = load_strategy_from_file()
     if not saved:
         print("❌ ما في استراتيجية في Redis!")
         return
