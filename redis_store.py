@@ -27,6 +27,8 @@ def load_best():
             print("⚠️ Redis فارغ")
             return None
         data = json.loads(str(result))
+        if "value" in data:
+            data = json.loads(data["value"])
         if "strategy" in data and "stats" in data:
             print("✅ تم التحميل من Redis")
             return data
@@ -38,3 +40,4 @@ def load_best():
 def clear_best():
     redis_client.delete(KEY)
     print("🗑️ تم مسح Redis ✅")
+
