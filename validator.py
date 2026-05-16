@@ -108,11 +108,11 @@ def validate():
     df = extract_features(df)
     print(f"✅ Features: {len(df)} صف")
 
-    print(f"\n⚙️ اختبار استراتيجية BTC على SOL 1h...")
-    stats = backtest_strategy(strategy, df)
+    print(f"\n⚙️ اختبار استراتيجية BTC على SOL 5m...")
+    stats, failures, trades, signals = backtest_strategy(strategy, df)
 
     if not stats:
-        print("❌ ما في صفقات كافية على SOL 1h!")
+        print("❌ ما في صفقات كافية على SOL!")
         print("⚠️ الاستراتيجية مرتبطة بـ BTC فقط")
         return
 
