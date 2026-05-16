@@ -30,7 +30,7 @@ def load_strategy_from_file():
         }
     }
 
-def load_new_data(limit=5000):
+def load_new_data(limit=10000):
     import requests
     import time
 
