@@ -17,8 +17,8 @@ from upstash_redis import Redis
 # ══════════════════════════════
 # Config
 # ══════════════════════════════
-SYMBOL = "BTC-USDT"
-SYMBOL_CLEAN = "BTC"
+SYMBOL = "SOL-USDT"
+SYMBOL_CLEAN = "SOL"
 MAX_OPEN_TRADES = 5
 CAPITAL_PER_TRADE = 10
 LEVERAGE = 3
