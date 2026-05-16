@@ -5,10 +5,10 @@ from backtester import backtest_strategy
 from redis_store import load_best
 
 # ══════════════════════════════
-# نختبر استراتيجية BTC على SOL 1h
+# نختبر استراتيجية BTC على SOL 5m
 # ══════════════════════════════
 SYMBOL = "SOL-USDT" # ← غيرنا لـ SOL
-INTERVAL = "1h"
+INTERVAL = "5m"
 
 def load_new_data(limit=5000):
     import requests
