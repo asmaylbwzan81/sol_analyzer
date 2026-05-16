@@ -13,8 +13,8 @@ from redis_store import save_best, load_best
 # ══════════════════════════════
 # Config
 # ══════════════════════════════
-POPULATION_SIZE = 300
-GENERATIONS = 50
+POPULATION_SIZE = 100
+GENERATIONS = 30
 TOP_KEEP = 30
 TARGET_TRADES = 200
 
