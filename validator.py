@@ -5,10 +5,10 @@ from features import extract_features
 from backtester import backtest_strategy
 
 # ══════════════════════════════
-# نختبر استراتيجية BTC على BTC 5m
+# نختبر استراتيجية BTC على BTC 1h
 # ══════════════════════════════
 SYMBOL = "BTC-USDT"
-INTERVAL = "5m"
+INTERVAL = "1h"
 
 def load_strategy_from_file():
     return {
@@ -30,7 +30,7 @@ def load_strategy_from_file():
         }
     }
 
-    def load_new_data(limit=10000):
+def load_new_data(limit=5000):
     import requests
     import time
 
@@ -116,8 +116,8 @@ def validate():
         print("⚠️ الاستراتيجية مرتبطة بـ 5m فقط")
         return
 
- print(f"\n{'═'*40}")
-    print(f"📊 نتائج BTC 5m:")
+    print(f"\n{'═'*40}")
+    print(f"📊 نتائج BTC 1h:")
     print(f" Win Rate: {stats['win_rate']*100:.1f}%")
     print(f" Total Profit: {stats['total_profit']*100:.1f}%")
     print(f" Profit Factor: {stats['profit_factor']}")
@@ -130,11 +130,11 @@ def validate():
     print(f"\n{'═'*40}")
     print(f"📋 المقارنة:")
     print(f" BTC 5m: Win={train_stats['win_rate']*100:.1f}%")
-    print(f" BTC 5m: Win={stats['win_rate']*100:.1f}%")
+    print(f" BTC 1h: Win={stats['win_rate']*100:.1f}%")
     print(f" الفرق: {diff*100:.1f}%")
 
     if stats['win_rate'] > 0.55 and diff < 0.20:
-        print(f"\n✅ الاستراتيجية تعمل على BTC 5m أيضاً! 🏆")
+        print(f"\n✅ الاستراتيجية تعمل على BTC 1h أيضاً! 🏆")
         print(f"🚀 الاستراتيجية قوية وتعمم!")
     else:
         print(f"\n❌ الاستراتيجية مرتبطة بـ 5m فقط")
