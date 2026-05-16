@@ -116,7 +116,7 @@ def validate():
         print("⚠️ الاستراتيجية مرتبطة بـ 5m فقط")
         return
 
-    print(f"\n{'═'*40}")
+ print(f"\n{'═'*40}")
     print(f"📊 نتائج BTC 5m:")
     print(f" Win Rate: {stats['win_rate']*100:.1f}%")
     print(f" Total Profit: {stats['total_profit']*100:.1f}%")
