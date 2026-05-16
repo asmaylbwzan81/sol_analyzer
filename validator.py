@@ -11,14 +11,24 @@ SYMBOL = "SOL-USDT"
 INTERVAL = "5m"
 
 def load_strategy_from_file():
-    try:
-        with open("s.json", "r") as f:
-            data = json.load(f)
-        print("✅ تم تحميل الاستراتيجية من الملف")
-        return data
-    except Exception as e:
-        print(f"❌ خطأ في قراءة الملف: {e}")
-        return None
+    return {
+        "strategy": {
+            "conditions": [
+                {"feature": "std_50", "operator": "<", "threshold": 0.0019},
+                {"feature": "std_50", "operator": ">", "threshold": 0.001769},
+                {"feature": "mean_reversion", "operator": "<", "threshold": -1.103387}
+            ],
+            "direction": "LONG"
+        },
+        "stats": {
+            "trades": 55,
+            "win_rate": 0.8364,
+            "total_profit": 1.245,
+            "profit_factor": 10.2222,
+            "drawdown": 0.0568,
+            "sharpe": 10.0841
+        }
+    }
 
 def load_new_data(limit=5000):
     import requests
