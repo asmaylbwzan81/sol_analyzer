@@ -80,12 +80,12 @@ def load_new_data(limit=5000):
     return all_candles[:limit]
 
 def validate():
-    print("🔍 بدء التحقق — استراتيجية BTC على SOL 1h...")
+    print("🔍 بدء التحقق — استراتيجية BTC على BTC 1h...")
     print("━" * 40)
 
     saved = load_strategy_from_file()
     if not saved:
-        print("❌ ما في استراتيجية في Redis!")
+        print("❌ ما في استراتيجية!")
         return
 
     strategy = saved["strategy"]
@@ -100,7 +100,7 @@ def validate():
     print(f" Profit: {train_stats['total_profit']*100:.1f}%")
     print(f" Drawdown: {train_stats['drawdown']*100:.1f}%")
 
-    print(f"\n📥 جلب 5000 شمعة SOL 1h...")
+    print(f"\n📥 جلب 5000 شمعة BTC 1h...")
     new_candles = load_new_data(5000)
     print(f"✅ {len(new_candles)} شمعة")
 
@@ -108,16 +108,16 @@ def validate():
     df = extract_features(df)
     print(f"✅ Features: {len(df)} صف")
 
-    print(f"\n⚙️ اختبار استراتيجية BTC على SOL 5m...")
+    print(f"\n⚙️ اختبار استراتيجية BTC على BTC 1h...")
     stats, failures, trades, signals = backtest_strategy(strategy, df)
 
     if not stats:
-        print("❌ ما في صفقات كافية على SOL!")
-        print("⚠️ الاستراتيجية مرتبطة بـ BTC فقط")
+        print("❌ ما في صفقات كافية على BTC 1h!")
+        print("⚠️ الاستراتيجية مرتبطة بـ 5m فقط")
         return
 
     print(f"\n{'═'*40}")
-    print(f"📊 نتائج SOL 1h:")
+    print(f"📊 نتائج BTC 1h:")
     print(f" Win Rate: {stats['win_rate']*100:.1f}%")
     print(f" Total Profit: {stats['total_profit']*100:.1f}%")
     print(f" Profit Factor: {stats['profit_factor']}")
@@ -130,15 +130,15 @@ def validate():
     print(f"\n{'═'*40}")
     print(f"📋 المقارنة:")
     print(f" BTC 5m: Win={train_stats['win_rate']*100:.1f}%")
-    print(f" SOL 1h: Win={stats['win_rate']*100:.1f}%")
+    print(f" BTC 1h: Win={stats['win_rate']*100:.1f}%")
     print(f" الفرق: {diff*100:.1f}%")
 
     if stats['win_rate'] > 0.55 and diff < 0.20:
-        print(f"\n✅ الاستراتيجية تعمل على SOL أيضاً! 🏆")
-        print(f"🚀 يمكن تطبيقها على SOL!")
+        print(f"\n✅ الاستراتيجية تعمل على BTC 1h أيضاً! 🏆")
+        print(f"🚀 الاستراتيجية قوية وتعمم!")
     else:
-        print(f"\n❌ الاستراتيجية مرتبطة بـ BTC فقط")
-        print(f"🔄 SOL يحتاج استراتيجية خاصة")
+        print(f"\n❌ الاستراتيجية مرتبطة بـ 5m فقط")
+        print(f"🔄 نكمل التطوير...")
 
 if __name__ == "__main__":
     validate()
