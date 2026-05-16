@@ -40,4 +40,3 @@ def load_best():
 def clear_best():
     redis_client.delete(KEY)
     print("🗑️ تم مسح Redis ✅")
-
