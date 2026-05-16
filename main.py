@@ -45,6 +45,7 @@ HEADERS = {"Authorization": f"Bearer {REDIS_TOKEN}"}
 
 def redis_set(key, value):
     try:
+        # نكتب كـ string عشان upstash_redis يقرأها صح
         requests.post(
             f"{REDIS_URL}/set/{key}",
             headers=HEADERS,
@@ -162,7 +163,7 @@ def send_signal_to_redis(direction, price, row):
         }
 
         redis_set("signal:pending", signal_data)
-        print(f"📡 إشارة أُرسلت على Redis | {direction} | Confidence: {confidence}% | TP: {tp1} | SL: {sl}")
+        print(f"📡 إشارة على Redis | {direction} | Confidence: {confidence}% | TP: {tp1} | SL: {sl}")
         return True
 
     except Exception as e:
@@ -321,7 +322,7 @@ def cleanup_loop():
             result = redis_get("signal:result")
             if result:
                 symbol = result.get("symbol", "")
-                print(f"📊 نتيجة صفقة {symbol}: {result.get('result')} | PnL: {result.get('pnl_pct')}%")
+                print(f"📊 نتيجة {symbol}: {result.get('result')} | PnL: {result.get('pnl_pct')}%")
                 with lock:
                     open_trades.clear()
         except Exception as e:
