@@ -159,7 +159,7 @@ def apply_strategy(strategy, row):
     for cond in strategy["conditions"]:
         val = row.get(cond["feature"])
         if val is None or (isinstance(val, float) and np.isnan(val)):
-            continue
+            return False # ← الإصلاح: رفض الإشارة بدل تجاهل الشرط
         if cond["operator"] == ">" and not (val > cond["threshold"]):
             return False
         if cond["operator"] == "<" and not (val < cond["threshold"]):
@@ -177,7 +177,7 @@ def strategy_confidence(strategy, row):
         rng = high - low + 1e-10
         if cond["operator"] == ">" and val > cond["threshold"]:
             scores.append(min(1.0, (val - cond["threshold"]) / rng))
-        elif cond["operator"] == "<" and val < cond["threshold"]:
+        elif cond["operator"] == "<" and val < cond["threshold"]):
             scores.append(min(1.0, (cond["threshold"] - val) / rng))
         else:
             scores.append(0.0)
@@ -205,3 +205,4 @@ def print_strategy(strategy, index=0):
     if "profile" in strategy:
         p = strategy["profile"]
         print(f" 🎯 Regime: {p['regime_preference']} | Vol: {p['volatility_sensitivity']}")
+
