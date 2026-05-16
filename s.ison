@@ -1,1 +1,3 @@
-{"strategy": {"conditions": [{"feature": "std_50", "operator": "<", "threshold": 0.0019}, {"feature": "std_50", "operator": ">", "threshold": 0.001769}, {"feature": "mean_reversion", "operator": "<", "threshold": -1.103387}], "direction": "LONG"}, "stats": {"trades": 55, "win_rate": 0.8364, "total_profit": 1.245, "profit_factor": 10.2222, "drawdown": 0.0568, "sharpe": 10.0841}}
+{"strategy": {"conditions": [{"feature": "std_50", "operator": "<", "threshold": 0.0019}, {"feature": "std_50",
+"operator": ">", "threshold": 0.001769}, {"feature": "mean_reversion", "operator": "<", "threshold": -1.103387}], "direction": "LONG"}, "stats": {"trades": 55, "win_rate": 0.8364,
+"total_profit": 1.245, "profit_factor": 10.2222, "drawdown": 0.0568, "sharpe": 10.0841}}
