@@ -287,6 +287,7 @@ def trading_loop():
             signal = apply_strategy(strategy, last_row)
 
             # طباعة قيم الشروط
+            print(f"─── {datetime.now().strftime('%H:%M:%S')} ───────────────")
             for cond in strategy.get("conditions", []):
                 feature = cond["feature"]
                 operator = cond["operator"]
