@@ -5,10 +5,10 @@ from features import extract_features
 from backtester import backtest_strategy
 
 # ══════════════════════════════
-# نختبر استراتيجية BTC على BTC 1h
+# نختبر استراتيجية BTC على BTC 5m
 # ══════════════════════════════
 SYMBOL = "BTC-USDT"
-INTERVAL = "1h"
+INTERVAL = "5m"
 
 def load_strategy_from_file():
     return {
