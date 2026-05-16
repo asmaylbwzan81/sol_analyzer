@@ -5,9 +5,9 @@ from backtester import backtest_strategy
 from redis_store import load_best
 
 # ══════════════════════════════
-# نختبر على BTC 1h — فريم مختلف
+# نختبر استراتيجية BTC على SOL 1h
 # ══════════════════════════════
-SYMBOL = "BTC-USDT"
+SYMBOL = "SOL-USDT" # ← غيرنا لـ SOL
 INTERVAL = "1h"
 
 def load_new_data(limit=5000):
@@ -60,10 +60,10 @@ def load_new_data(limit=5000):
     return all_candles[:limit]
 
 def validate():
-    print("🔍 بدء التحقق على BTC 1h...")
+    print("🔍 بدء التحقق — استراتيجية BTC على SOL 1h...")
     print("━" * 40)
 
-    saved = load_best()
+    saved = load_best() # ← يقرأ استراتيجية BTC
     if not saved:
         print("❌ ما في استراتيجية في Redis!")
         return
@@ -75,12 +75,12 @@ def validate():
     for cond in strategy["conditions"]:
         print(f" {cond['feature']} {cond['operator']} {cond['threshold']}")
     print(f" Direction: {strategy['direction']}")
-    print(f"\n📊 نتائج التدريب (5m):")
+    print(f"\n📊 نتائج التدريب على BTC (5m):")
     print(f" Win Rate: {train_stats['win_rate']*100:.1f}%")
     print(f" Profit: {train_stats['total_profit']*100:.1f}%")
     print(f" Drawdown: {train_stats['drawdown']*100:.1f}%")
 
-    print(f"\n📥 جلب 5000 شمعة BTC 1h...")
+    print(f"\n📥 جلب 5000 شمعة SOL 1h...")
     new_candles = load_new_data(5000)
     print(f"✅ {len(new_candles)} شمعة")
 
@@ -88,16 +88,16 @@ def validate():
     df = extract_features(df)
     print(f"✅ Features: {len(df)} صف")
 
-    print(f"\n⚙️ اختبار على BTC 1h...")
+    print(f"\n⚙️ اختبار استراتيجية BTC على SOL 1h...")
     stats = backtest_strategy(strategy, df)
 
     if not stats:
-        print("❌ ما في صفقات كافية على 1h!")
-        print("⚠️ الاستراتيجية مرتبطة بـ 5m فقط = Overfitting")
+        print("❌ ما في صفقات كافية على SOL 1h!")
+        print("⚠️ الاستراتيجية مرتبطة بـ BTC فقط")
         return
 
     print(f"\n{'═'*40}")
-    print(f"📊 نتائج BTC 1h:")
+    print(f"📊 نتائج SOL 1h:")
     print(f" Win Rate: {stats['win_rate']*100:.1f}%")
     print(f" Total Profit: {stats['total_profit']*100:.1f}%")
     print(f" Profit Factor: {stats['profit_factor']}")
@@ -109,16 +109,17 @@ def validate():
 
     print(f"\n{'═'*40}")
     print(f"📋 المقارنة:")
-    print(f" 5m: Win={train_stats['win_rate']*100:.1f}%")
-    print(f" 1h: Win={stats['win_rate']*100:.1f}%")
+    print(f" BTC 5m: Win={train_stats['win_rate']*100:.1f}%")
+    print(f" SOL 1h: Win={stats['win_rate']*100:.1f}%")
     print(f" الفرق: {diff*100:.1f}%")
 
     if stats['win_rate'] > 0.55 and diff < 0.20:
-        print(f"\n✅ الاستراتيجية حقيقية! تعمل على 5m و 1h 🏆")
-        print(f"🚀 جاهزة للتنفيذ!")
+        print(f"\n✅ الاستراتيجية تعمل على SOL أيضاً! 🏆")
+        print(f"🚀 يمكن تطبيقها على SOL!")
     else:
-        print(f"\n❌ Overfitting! تعمل على 5m فقط")
-        print(f"🔄 نكمل التطوير...")
+        print(f"\n❌ الاستراتيجية مرتبطة بـ BTC فقط")
+        print(f"🔄 SOL يحتاج استراتيجية خاصة")
 
 if __name__ == "__main__":
     validate()
+
