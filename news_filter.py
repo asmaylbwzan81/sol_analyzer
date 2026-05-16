@@ -1,11 +1,13 @@
 import requests
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import time
 
 # ══════════════════════════════
 # إعدادات
 # ══════════════════════════════
+FINNHUB_API_KEY = "d8492q1r01qutij8ca00d8492q1r01qutij8ca0g"
+
 NEWS_SOURCES = [
     "https://www.coindesk.com/arc/outboundfeeds/rss/",
     "https://cointelegraph.com/rss",
@@ -87,7 +89,7 @@ def get_sentiment(symbol: str = "bitcoin") -> float:
 
 
 # ══════════════════════════════
-# Economic Calendar
+# Economic Calendar — Finnhub
 # ══════════════════════════════
 def get_economic_events() -> list:
     now = time.time()
@@ -95,37 +97,32 @@ def get_economic_events() -> list:
         return _cache["calendar"]
 
     events = []
-    urls = [
-        "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
-        "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
-    ]
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    week_later = (datetime.utcnow() + timedelta(days=7)).strftime("%Y-%m-%d")
 
-    for url in urls:
-        try:
-            r = requests.get(url, timeout=10)
-            if r.status_code != 200:
-                continue
-            data = r.json()
-            if not data:
-                continue
+    url = f"https://finnhub.io/api/v1/calendar/economic?from={today}&to={week_later}&token={FINNHUB_API_KEY}"
 
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            data = r.json().get("economicCalendar", [])
             for event in data:
-                if event.get("impact", "").lower() != "high":
+                impact = event.get("impact", "").lower()
+                if impact not in ["high", "3"]:
                     continue
-                date_str = event.get("date", "")
-                time_str = event.get("time", "")
-                if not date_str or not time_str or time_str == "All Day":
+                date_str = event.get("time", "")
+                if not date_str:
                     continue
                 try:
-                    dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %I:%M%p")
+                    dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
                     dt = dt.replace(tzinfo=timezone.utc)
-                    events.append({"title": event.get("title", ""), "time": dt})
+                    events.append({"title": event.get("event", ""), "time": dt})
                 except:
                     continue
-            if events:
-                break
-        except Exception as e:
-            continue
+        else:
+            print(f"⚠️ Finnhub Economic Calendar — status {r.status_code}")
+    except Exception as e:
+        print(f"⚠️ Economic Calendar غير متاح — نكمل بدونه ({e})")
 
     if not events:
         print("⚠️ Economic Calendar غير متاح — نكمل بدونه")
