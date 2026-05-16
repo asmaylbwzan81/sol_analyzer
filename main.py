@@ -26,7 +26,7 @@ EVOLVE_INTERVAL = 60
 
 TP_PCT = 0.008 # 0.8%
 SL_PCT = 0.004 # 0.4%
-MIN_CONFIDENCE = 60
+MIN_CONFIDENCE = 65
 
 ERROR_LOG_FILE = "error_log.jsonl"
 
@@ -291,6 +291,18 @@ def trading_loop():
                 continue
 
             signal = apply_strategy(strategy, last_row)
+
+            # طباعة قيم الشروط
+            for cond in strategy.get("conditions", []):
+                feature = cond["feature"]
+                operator = cond["operator"]
+                threshold = cond["threshold"]
+                value = last_row.get(f"1m_{feature}", last_row.get(feature, 0))
+                try:
+                    met = "✅" if eval(f"{value} {operator} {threshold}") else "❌"
+                except:
+                    met = "❓"
+                print(f"📊 {feature} = {float(value):.4f} | {operator} {threshold} {met}")
 
             if signal:
                 direction = strategy["direction"]
