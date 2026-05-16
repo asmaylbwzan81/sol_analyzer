@@ -8,7 +8,7 @@ load_dotenv()
 REDIS_URL = os.environ.get("UPSTASH_REDIS_REST_URL")
 REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
 HEADERS = {"Authorization": f"Bearer {REDIS_TOKEN}"}
-KEY = "best_strategy"
+KEY = "best_strategy:SOL"
 
 def save_best(strategy, stats):
     data = json.dumps({"strategy": strategy, "stats": stats})
