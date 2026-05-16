@@ -177,7 +177,7 @@ def strategy_confidence(strategy, row):
         rng = high - low + 1e-10
         if cond["operator"] == ">" and val > cond["threshold"]:
             scores.append(min(1.0, (val - cond["threshold"]) / rng))
-        elif cond["operator"] == "<" and val < cond["threshold"]):
+        elif cond["operator"] == "<" and val < cond["threshold"]:
             scores.append(min(1.0, (cond["threshold"] - val) / rng))
         else:
             scores.append(0.0)
