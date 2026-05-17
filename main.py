@@ -1,11 +1,12 @@
-from data_engine import init_all, SYMBOLS, TIMEFRAMES, count_candles
+from data_engine import pipeline_init_all, SYMBOLS, TIMEFRAMES, count_candles
+import asyncio
 import time
 
 def main():
     print("🚀 نظام التداول الكمي — بدء التشغيل")
     print("━" * 40)
     
-    init_all()
+    asyncio.run(pipeline_init_all())
     
     print("\n📊 ملخص البيانات:")
     for symbol in SYMBOLS:
