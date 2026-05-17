@@ -1,0 +1,8 @@
+requests
+pandas
+numpy
+scipy
+scikit-learn
+upstash-redis
+python-dotenv
+groq
