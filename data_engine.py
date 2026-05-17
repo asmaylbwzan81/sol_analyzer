@@ -1,30 +1,26 @@
-import requests
+import asyncio
+import aiohttp
 import sqlite3
+import pandas as pd
+import numpy as np
 import time
-from datetime import datetime
 
 # ══════════════════════════════
-# إعدادات
+# إعدادات هندسية ثابتة
 # ══════════════════════════════
 BINGX_BASE = "https://open-api.bingx.com"
 DB_PATH = "market_data.db"
 MAX_PER_REQUEST = 1440
 
-SYMBOLS = [
-    "BTC-USDT",
-    "SOL-USDT",
-    "DOGE-USDT",
-    "BNB-USDT",
-    "XRP-USDT"
-]
+SYMBOLS = ["BTC-USDT", "SOL-USDT", "DOGE-USDT", "BNB-USDT", "XRP-USDT"]
 
 TIMEFRAMES = {
-    "1m": 10000, # ~7 أيام — للإشارة السريعة
-    "5m": 5000, # ~17 يوم — للتأكيد
+    "1m": 10000, # شمعة الدقيقة
+    "5m": 5000, # شمعة الـ 5 دقائق
 }
 
 # ══════════════════════════════
-# قاعدة البيانات
+# إدارة قاعدة البيانات (SQLite)
 # ══════════════════════════════
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -44,9 +40,11 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
-    print("✅ قاعدة البيانات جاهزة")
+    print("✅ قاعدة البيانات المتزامنة جاهزة")
 
 def save_candles(candles, symbol, interval):
+    if not candles:
+        return
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.executemany('''
@@ -54,165 +52,123 @@ def save_candles(candles, symbol, interval):
         (timestamp, symbol, interval, open, high, low, close, volume)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ''', [(
-        candle["timestamp"], symbol, interval,
-        candle["open"], candle["high"], candle["low"],
-        candle["close"], candle["volume"]
-    ) for candle in candles])
+        c["timestamp"], symbol, interval,
+        c["open"], c["high"], c["low"], c["close"], c["volume"]
+    ) for c in candles])
     conn.commit()
     conn.close()
-
-def load_candles(symbol, interval, limit=None):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    if limit:
-        c.execute('''
-            SELECT timestamp, open, high, low, close, volume
-            FROM candles
-            WHERE symbol=? AND interval=?
-            ORDER BY timestamp DESC
-            LIMIT ?
-        ''', (symbol, interval, limit))
-    else:
-        c.execute('''
-            SELECT timestamp, open, high, low, close, volume
-            FROM candles
-            WHERE symbol=? AND interval=?
-            ORDER BY timestamp DESC
-        ''', (symbol, interval))
-    rows = c.fetchall()
-    conn.close()
-    return [{
-        "timestamp": r[0],
-        "open": r[1],
-        "high": r[2],
-        "low": r[3],
-        "close": r[4],
-        "volume": r[5]
-    } for r in reversed(rows)]
 
 def count_candles(symbol, interval):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('SELECT COUNT(*) FROM candles WHERE symbol=? AND interval=?',
-              (symbol, interval))
+    c.execute('SELECT COUNT(*) FROM candles WHERE symbol=? AND interval=?', (symbol, interval))
     count = c.fetchone()[0]
     conn.close()
     return count
 
+def load_candles_to_df(symbol, interval):
+    """تحميل البيانات مباشرة في قالب Pandas DataFrame متوافق مع محرك الخصائص"""
+    conn = sqlite3.connect(DB_PATH)
+    query = '''
+        SELECT timestamp, open, high, low, close, volume
+        FROM candles
+        WHERE symbol=? AND interval=?
+        ORDER BY timestamp ASC
+    '''
+    df = pd.read_sql_query(query, conn, params=(symbol, interval))
+    conn.close()
+    return df
+
 # ══════════════════════════════
-# جلب البيانات من BingX
+# جلب البيانات بشكل متوازٍ (Async Fetching)
 # ══════════════════════════════
-def fetch_candles(symbol, interval, target):
+async def fetch_candles_async(session, symbol, interval, target):
     all_candles = []
     end_time = None
+    existing = count_candles(symbol, interval)
+    
+    if existing >= target:
+        print(f"✅ {symbol} | {interval} جاهز مسبقاً ({existing} شمعة)")
+        return
 
-    print(f"📥 جلب {target} شمعة | {symbol} | {interval}")
+    print(f"📥 بدء جلب {target} شمعة لـ {symbol} فريم {interval}...")
 
-    while len(all_candles) < target:
+    while len(all_candles) < (target - existing):
         try:
             params = {
                 "symbol": symbol,
                 "interval": interval,
-                "limit": MAX_PER_REQUEST
+                "limit": str(MAX_PER_REQUEST)
             }
             if end_time:
-                params["endTime"] = end_time
+                params["endTime"] = str(end_time)
 
-            response = requests.get(
-                f"{BINGX_BASE}/openApi/swap/v2/quote/klines",
-                params=params,
-                timeout=10
-            ).json()
+            url = f"{BINGX_BASE}/openApi/swap/v2/quote/klines"
+            async with session.get(url, params=params, timeout=15) as response:
+                res_json = await response.json()
+                candles = res_json.get("data", [])
+                
+                if not candles:
+                    break
 
-            candles = response.get("data", [])
-            if not candles:
-                break
+                # ترتيب وتوحيد الحقول لتتوافق مع محرك الاستخراج
+                candles = sorted(candles, key=lambda x: int(x["time"]))
+                batch = [{
+                    "timestamp": int(c["time"]),
+                    "open": float(c["open"]),
+                    "high": float(c["high"]),
+                    "low": float(c["low"]),
+                    "close": float(c["close"]),
+                    "volume": float(c["volume"])
+                } for c in candles]
 
-            candles = sorted(candles, key=lambda x: x["time"])
-            batch = [{
-                "timestamp": int(c["time"]),
-                "open": float(c["open"]),
-                "high": float(c["high"]),
-                "low": float(c["low"]),
-                "close": float(c["close"]),
-                "volume": float(c["volume"])
-            } for c in candles]
-
-            all_candles = batch + all_candles
-            end_time = candles[0]["time"] - 1
-
-            print(f" {len(all_candles)}/{target}...")
-            time.sleep(0.3)
+                all_candles = batch + all_candles
+                end_time = int(candles[0]["time"]) - 1
+                
+                # تعليق ميكروي لتجنب الحظر
+                await asyncio.sleep(0.1)
 
         except Exception as e:
-            print(f"❌ خطأ: {e}")
+            print(f"❌ خطأ أثناء جلب {symbol} | {interval}: {e}")
             break
 
-    return all_candles[:target]
+    save_candles(all_candles, symbol, interval)
+    print(f"💾 تم حفظ بيانات {symbol} | {interval} بنجاح.")
 
-# ══════════════════════════════
-# تهيئة كل العملات والفريمات
-# ══════════════════════════════
-def init_all(symbols=SYMBOLS):
+async def pipeline_init_all():
     init_db()
-    for symbol in symbols:
-        print(f"\n{'─'*40}")
-        print(f"🪙 {symbol}")
-        for interval, target in TIMEFRAMES.items():
-            existing = count_candles(symbol, interval)
-            if existing < target:
-                candles = fetch_candles(symbol, interval, target)
-                save_candles(candles, symbol, interval)
-                print(f"✅ {interval}: {count_candles(symbol, interval)} شمعة")
-            else:
-                print(f"✅ {interval}: {existing} شمعة — جاهز")
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+        for symbol in SYMBOLS:
+            for interval, target in TIMEFRAMES.items():
+                tasks.append(fetch_candles_async(session, symbol, interval, target))
+        # تشغيل جميع المهام في نفس الأجزاء من الثانية بالتوازي
+        await asyncio.gather(*tasks)
 
 # ══════════════════════════════
-# تحميل بيانات عملة واحدة
+# تحميل حزم البيانات الموحدة للمحرك الرياضي
 # ══════════════════════════════
-def load_symbol_data(symbol):
-    import pandas as pd
-    result = {}
-    for interval in TIMEFRAMES.keys():
-        candles = load_candles(symbol, interval)
-        if candles:
-            result[interval] = pd.DataFrame(candles)
-    return result
+def load_all_data_for_engine():
+    """تجهيز البيانات بالصيغة المصفوفيّة المباشرة المدعومة من كود الخصائص"""
+    all_data = {}
+    for symbol in SYMBOLS:
+        df_1m = load_candles_to_df(symbol, "1m")
+        df_5m = load_candles_to_df(symbol, "5m")
+        all_data[symbol] = {"1m": df_1m, "5m": df_5m}
+    return all_data
 
 # ══════════════════════════════
-# تحميل بيانات كل العملات
-# ══════════════════════════════
-def load_all_data(symbols=SYMBOLS):
-    return {symbol: load_symbol_data(symbol) for symbol in symbols}
-
-# ══════════════════════════════
-# آخر شمعة مباشرة من BingX
-# ══════════════════════════════
-def get_latest_price(symbol):
-    try:
-        params = {"symbol": symbol, "interval": "1m", "limit": 1}
-        response = requests.get(
-            f"{BINGX_BASE}/openApi/swap/v2/quote/klines",
-            params=params,
-            timeout=10
-        ).json()
-        candles = response.get("data", [])
-        if candles:
-            return float(candles[0]["close"])
-    except:
-        pass
-    return None
-
-# ══════════════════════════════
-# تشغيل
+# نقطة التشغيل الأساسية
 # ══════════════════════════════
 if __name__ == "__main__":
-    print("🚀 تهيئة النظام...")
-    print("━" * 40)
-    init_all()
-    print("\n📊 ملخص:")
+    print("🚀 إطلاق محرك جلب البيانات غير المتزامن الحجمي...")
+    print("━" * 50)
+    
+    # تشغيل حلقة الـ Async
+    asyncio.run(pipeline_init_all())
+    
+    print("\n📊 ملخص حجم البيانات النهائي في قاعدة البيانات:")
     for symbol in SYMBOLS:
         for interval in TIMEFRAMES:
-            count = count_candles(symbol, interval)
-            print(f" {symbol} | {interval}: {count} شمعة")
+            print(f" {symbol} | {interval}: {count_candles(symbol, interval)} شمعة")
 
