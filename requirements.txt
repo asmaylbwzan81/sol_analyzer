@@ -6,3 +6,4 @@ scikit-learn
 upstash-redis
 python-dotenv
 groq
+aiohttp
