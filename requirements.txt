@@ -1,6 +1,0 @@
-requests
-pandas
-groq
-upstash-redis
-scipy
-python-dotenv
