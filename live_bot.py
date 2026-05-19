@@ -116,9 +116,14 @@ async def process_symbol(session, symbol):
                 "symbol": symbol,
                 "direction": signal_direction,
                 "price": round(current_close, 4),
-                "tp": round(tp_price, 4),
+                "tp1": round(tp_price, 4),
                 "sl": round(sl_price, 4),
-                "timestamp": int(time.time())
+                "timestamp": int(time.time()),
+                "status": "pending",
+                "confidence": 75,
+                "trend": current_regime.upper(),
+                "rsi": 50,
+                "adx": 25
             }
 
             await redis_client.set("signal:pending", json.dumps(signal_payload))
@@ -144,3 +149,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
