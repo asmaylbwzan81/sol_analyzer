@@ -172,7 +172,7 @@ async def process_symbol(session, symbol):
                 "adx": 25
             }
 
-            await redis_client.set("signal:pending", json.dumps(signal_payload))
+            await redis_client.set(f"signal:pending:{symbol}", json.dumps(signal_payload))
             await set_signal_cooldown(symbol) # حفظ Cooldown بعد الإرسال
             print(f" 🎯 إشارة: {symbol} -> {signal_direction} | السعر: {current_close} | {current_regime.upper()}")
 
