@@ -80,20 +80,16 @@ async def get_best_live_strategy_async(symbol, market_regime):
     return strategies[0]
 
 async def is_in_signal_cooldown(symbol) -> bool:
-    """🛠️ تحقق إذا العملة في فترة Cooldown للإشارات (معدلة ومحمية لضمان فك تشفير البيانات الحية)"""
+    """تحقق إذا العملة في فترة Cooldown للإشارات"""
     try:
         key = f"last_signal:{symbol}"
         last_time = await redis_client.get(key)
         if last_time:
-            # صمام أمان لفك تشفير بايتات Redis ديناميكيًا لو أعادتها الغيمة كـ bytes
-            last_time_str = last_time.decode('utf-8') if isinstance(last_time, bytes) else str(last_time)
-            elapsed = int(time.time()) - int(last_time_str)
+            elapsed = int(time.time()) - int(str(last_time))
             if elapsed < SIGNAL_COOLDOWN:
-                remaining = (SIGNAL_COOLDOWN - elapsed) // 60
-                print(f"⏳ {symbol} في Cooldown — باقي {remaining} دقيقة")
                 return True
-    except Exception as e:
-        print(f"⚠️ تنبيه فحص الكول داون لـ {symbol}: {e}")
+    except:
+        pass
     return False
 
 async def set_signal_cooldown(symbol):
