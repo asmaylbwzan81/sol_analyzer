@@ -5,6 +5,7 @@ import time
 import aiohttp
 import pandas as pd
 from upstash_redis.asyncio import Redis
+
 from dotenv import load_dotenv
 
 from features import extract_all_features
@@ -49,23 +50,44 @@ async def fetch_candles_async(session, symbol, interval, limit=100):
         print(f" ❌ خطأ جلب {symbol} ({interval}): {e}")
         return pd.DataFrame()
 
+async def get_best_live_strategy_async(symbol, market_regime):
+    """
+    🎯 [الشرط 4]: قراءة الاستراتيجيات الثلاث المحفوظة في الذاكرة التطورية بشكل غير متزامن
+    واختيار الكروموسوم الأقوى بناءً على حالة السوق الحالية المكتشفة حياً.
+    """
+    regime_upper = str(market_regime).upper()
+    coin_clean = symbol.replace('-USDT', '')
+    
+    slots_keys = [
+        f"strategy_best_1:{coin_clean}:{regime_upper}",
+        f"strategy_best_2:{coin_clean}:{regime_upper}",
+        f"strategy_best_3:{coin_clean}:{regime_upper}"
+    ]
+    
+    strategies = []
+    for key in slots_keys:
+        raw_data = await redis_client.get(key)
+        if raw_data:
+            if isinstance(raw_data, str):
+                strategies.append(json.loads(raw_data))
+            else:
+                strategies.append(raw_data)
+                
+    if not strategies:
+        # خط دفاع خلفي آمن في حال لم ينتهِ الأوبتمايزر من ملء الخانات السحابية بعد
+        return {
+            "params": {"entropy_max": 4.0, "fourier_min": 5.0, "z_trigger": 1.5},
+            "tp_pct": 0.0045,
+            "sl_pct": 0.0025
+        }
+        
+    # فرز دقيق وتنافسي: الاعتماد على السكور الحي أولاً للأداء الاستراتيجي ثم للياقة الجينية الأساسية
+    strategies.sort(key=lambda x: (x.get("live_score", 100.0), x.get("fitness", 0.0)), reverse=True)
+    return strategies[0]
+
 async def process_symbol(session, symbol):
     try:
-        redis_key = f"strategy:{symbol.replace('-USDT', '')}"
-        strategy_raw = await redis_client.get(redis_key)
-
-        if not strategy_raw:
-            return
-
-        if isinstance(strategy_raw, str):
-            strategy_data = json.loads(strategy_raw)
-        else:
-            strategy_data = strategy_raw
-           
-        params = strategy_data["params"]
-        tp_pct = float(strategy_data["tp_pct"])
-        sl_pct = float(strategy_data["sl_pct"])
-
+        # جلب شمعات البيانات لتحديد حالة السوق السائدة أولاً بدقة ميكانيكية
         df_1m, df_5m = await asyncio.gather(
             fetch_candles_async(session, symbol, "1m"),
             fetch_candles_async(session, symbol, "5m")
@@ -82,14 +104,24 @@ async def process_symbol(session, symbol):
         last_row = df_features.iloc[-1]
 
         current_close = float(last_row["close"])
-        current_regime = str(last_row["1m_regime"])
+        current_regime = str(last_row["1m_regime"]).strip().lower()
         current_zscore = float(last_row["1m_zscore_20"])
         current_entropy = float(last_row["1m_entropy"])
         current_fourier = float(last_row["1m_fourier"])
         current_returns = float(last_row["1m_returns"])
 
+        # 🔄 استدعاء القراءة الذكية غير المتزامنة للمجموعة البطلة المخصصة لحالة السوق المكتشفة حالياً
+        strategy_data = await get_best_live_strategy_async(symbol, current_regime)
+        
+        params = strategy_data["params"]
+        tp_pct = float(strategy_data["tp_pct"])
+        sl_pct = float(strategy_data["sl_pct"])
+
         signal_direction = None
 
+        # ------------------------------------------------------------------
+        # بيئة التذبذب العرضي (Ranging Regime) المستهدفة حياً بالمعلمات المتطورة
+        # ------------------------------------------------------------------
         if current_regime == "ranging":
             if current_entropy <= params['entropy_max'] and current_fourier >= params['fourier_min']:
                 if current_zscore >= params['z_trigger']:
@@ -97,6 +129,9 @@ async def process_symbol(session, symbol):
                 elif current_zscore <= -params['z_trigger']:
                     signal_direction = "BUY"
 
+        # ------------------------------------------------------------------
+        # بيئة الاتجاه (Trending Regime) المستهدفة حياً بالمعلمات المتطورة
+        # ------------------------------------------------------------------
         elif current_regime == "trending":
             if current_zscore > 1.0 and current_returns > 0:
                 signal_direction = "BUY"
@@ -112,6 +147,7 @@ async def process_symbol(session, symbol):
             tp_price = current_close * (1 + tp_pct) if signal_direction == "BUY" else current_close * (1 - tp_pct)
             sl_price = current_close * (1 - sl_pct) if signal_direction == "BUY" else current_close * (1 + sl_pct)
 
+            # توثيق وتأمين الهيكل القياسي المتوافق تماماً مع حقول محرك التنفيذ والإرسال المستقر
             signal_payload = {
                 "symbol": symbol,
                 "direction": signal_direction,
@@ -127,14 +163,15 @@ async def process_symbol(session, symbol):
             }
 
             await redis_client.set("signal:pending", json.dumps(signal_payload))
-            print(f" 🎯 إشارة موثقة: {symbol} -> {signal_direction} | السعر: {current_close}")
+            print(f" 🎯 إشارة موثقة تطورياً: {symbol} -> {signal_direction} | السعر: {current_close} | الـ Regime الحالية: {current_regime.upper()}")
 
     except Exception as e:
         print(f" ❌ خطأ معالجة {symbol}: {e}")
 
 async def main():
-    print("🤖 بوت المراقبة الحية غير المتزامن شغال 24/7 على السيرفر...")
-    print("━" * 60)
+    print("=" * 65)
+    print("🤖 ASYNC LIVE MONITOR BOT - EVOLUTIONARY OMNI VERSION")
+    print("=" * 65)
 
     async with aiohttp.ClientSession() as session:
         while True:
