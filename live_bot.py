@@ -21,6 +21,18 @@ redis_client = Redis(
     token=os.getenv("UPSTASH_REDIS_REST_TOKEN")
 )
 
+def get_price_precision(symbol: str) -> int:
+    """تحديد عدد الخانات العشرية المناسبة لكل عملة لمنع رفض الأوامر من المنصة"""
+    if "BTC" in symbol:
+        return 1
+    elif "SOL" in symbol or "BNB" in symbol:
+        return 2
+    elif "XRP" in symbol:
+        return 4
+    elif "DOGE" in symbol:
+        return 5
+    return 4
+
 async def fetch_candles_async(session, symbol, interval, limit=100):
     params = {
         "symbol": symbol,
@@ -85,11 +97,14 @@ async def is_in_signal_cooldown(symbol) -> bool:
         key = f"last_signal:{symbol}"
         last_time = await redis_client.get(key)
         if last_time:
-            elapsed = int(time.time()) - int(str(last_time))
+            last_time_str = last_time.decode('utf-8') if isinstance(last_time, bytes) else str(last_time)
+            elapsed = int(time.time()) - int(last_time_str)
             if elapsed < SIGNAL_COOLDOWN:
+                remaining = (SIGNAL_COOLDOWN - elapsed) // 60
+                print(f"⏳ {symbol} في Cooldown — باقي {remaining} دقيقة")
                 return True
-    except:
-        pass
+    except Exception as e:
+        print(f"⚠️ تنبيه فحص الكول داون لـ {symbol}: {e}")
     return False
 
 async def set_signal_cooldown(symbol):
@@ -155,15 +170,61 @@ async def process_symbol(session, symbol):
                 print(f"🚫 {symbol} — {reason}")
                 return
 
-            tp_price = current_close * (1 + tp_pct) if signal_direction == "BUY" else current_close * (1 - tp_pct)
-            sl_price = current_close * (1 - sl_pct) if signal_direction == "BUY" else current_close * (1 + sl_pct)
+            # 🔄 تحويل المسميات الفوري للتوافق المطلق مع محرك تنفيذ صفقات BingX والـ main
+            final_direction = "LONG" if signal_direction == "BUY" else "SHORT"
+            precision = get_price_precision(symbol)
+
+            # 📊 [إدماج نظام الكوانت الإحصائي]: Quant Mean Reversion SL/TP System
+            if current_regime == "ranging":
+                mean_price = float(last_row.get("1m_mean_20", current_close))
+                std_dev = float(last_row.get("1m_std_20", current_close * 0.0025))
+                volatility_factor = max(1.0, abs(current_zscore))
+                
+                MIN_SL_PCT = 0.0065 # 0.65%
+                MIN_TP_PCT = 0.0100 # 1.00%
+
+                if final_direction == "LONG":
+                    distance_to_mean = max(0.0, mean_price - current_close)
+                    tp_price = current_close + (distance_to_mean * 0.8)
+                    sl_price = current_close - (std_dev * volatility_factor)
+                    
+                    if tp_price < current_close * (1 + MIN_TP_PCT):
+                        tp_price = current_close * (1 + MIN_TP_PCT)
+                    if sl_price > current_close * (1 - MIN_SL_PCT):
+                        sl_price = current_close * (1 - MIN_SL_PCT)
+                else:
+                    distance_to_mean = max(0.0, current_close - mean_price)
+                    tp_price = current_close - (distance_to_mean * 0.8)
+                    sl_price = current_close + (std_dev * volatility_factor)
+                    
+                    if tp_price > current_close * (1 - MIN_TP_PCT):
+                        tp_price = current_close * (1 - MIN_TP_PCT)
+                    if sl_price < current_close * (1 + MIN_SL_PCT):
+                        sl_price = current_close * (1 + MIN_SL_PCT)
+                        
+                print(f"📊 [Quant Mode Active] أهداف تكيفية إحصائية لحالة التذبذب.")
+
+            else:
+                # 🟡 تعطيل النظام الإحصائي تلقائياً في حالات الترند
+                volatility_factor = max(1.0, abs(current_zscore))
+                adaptive_sl_pct = max(0.0065, sl_pct * volatility_factor)
+                adaptive_tp_pct = max(0.0100, tp_pct * volatility_factor)
+
+                if final_direction == "LONG":
+                    tp_price = current_close * (1 + adaptive_tp_pct)
+                    sl_price = current_close * (1 - adaptive_sl_pct)
+                else:
+                    tp_price = current_close * (1 - adaptive_tp_pct)
+                    sl_price = current_close * (1 + adaptive_sl_pct)
+                
+                print(f"📈 [Trend Mode Active] أهداف مرنة مبنية على الزخم.")
 
             signal_payload = {
                 "symbol": symbol,
-                "direction": signal_direction,
-                "price": round(current_close, 4),
-                "tp1": round(tp_price, 4),
-                "sl": round(sl_price, 4),
+                "direction": final_direction,
+                "price": round(current_close, precision),
+                "tp1": round(tp_price, precision),
+                "sl": round(sl_price, precision),
                 "timestamp": int(time.time()),
                 "status": "pending",
                 "confidence": 75,
@@ -172,9 +233,10 @@ async def process_symbol(session, symbol):
                 "adx": 25
             }
 
+            # 🚀 [التعديل المضاف لحماية الإشارات من المسح والتداخل]: تخصيص مفتاح منفصل لكل عملة
             await redis_client.set(f"signal:pending:{symbol}", json.dumps(signal_payload))
-            await set_signal_cooldown(symbol) # حفظ Cooldown بعد الإرسال
-            print(f" 🎯 إشارة: {symbol} -> {signal_direction} | السعر: {current_close} | {current_regime.upper()}")
+            await set_signal_cooldown(symbol)
+            print(f" 🎯 إشارة مرنة: {symbol} -> {final_direction} | السعر: {round(current_close, precision)} | الوقف: {round(sl_price, precision)} | الهدف: {round(tp_price, precision)} | {current_regime.upper()}")
 
     except Exception as e:
         print(f" ❌ خطأ معالجة {symbol}: {e}")
