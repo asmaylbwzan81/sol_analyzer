@@ -43,7 +43,7 @@ def calc_price_range(high, low, close):
 
 def _rolling_autocorr(x):
     """حساب التكور الذاتي السريع للمصفوفة"""
-    if len(x) < 2 or np.std(x) == 0: 
+    if len(x) < 2 or np.std(x) == 0:
         return 0.0
     s = pd.Series(x)
     return float(s.autocorr(lag=1))
@@ -67,7 +67,7 @@ def _rolling_fourier(x):
     chunk_detrended = x - np.mean(x)
     fft_vals = np.abs(fft(chunk_detrended))
     half_vals = fft_vals[1:N//2]
-    if len(half_vals) == 0: 
+    if len(half_vals) == 0:
         return 0.0
     mean_val = np.mean(half_vals)
     return float(np.max(half_vals) / (mean_val + 1e-10))
@@ -83,7 +83,7 @@ def detect_regime(df, window=WINDOW_LONG):
     vol = returns.rolling(window).std()
     vol_mean = vol.rolling(window * 2).mean()
     trend = (df["close"].rolling(window).mean().pct_change(10)).abs()
-    
+   
     # تصنيف الحالات مصفوفياً بدون تكرار
     regime = pd.Series("ranging", index=df.index)
     regime[trend > 0.005] = "trending"
@@ -99,9 +99,13 @@ def extract_features(df, prefix=""):
     high = df["high"]
     low = df["low"]
     volume = df["volume"]
-    
+   
     p = f"{prefix}_" if prefix else ""
-    
+   
+    # 🌟 [التعديل الإحصائي المضاف]: تغذية نظام الـ Quant Mean Reversion SL/TP بدون كسر الكود القديم
+    df[f"{p}mean_20"] = close.rolling(window=20).mean()
+    df[f"{p}std_20"] = close.rolling(window=20).std()
+   
     df[f"{p}zscore_20"] = calc_zscore(close, 20)
     df[f"{p}zscore_50"] = calc_zscore(close, 50)
     df[f"{p}mean_rev_20"] = calc_mean_reversion(close, 20)
@@ -119,7 +123,7 @@ def extract_features(df, prefix=""):
     df[f"{p}returns"] = close.pct_change()
     df[f"{p}returns_5"] = close.pct_change(5)
     df[f"{p}regime"] = detect_regime(df)
-    
+   
     return df.fillna(0)
 
 # ══════════════════════════════
@@ -128,10 +132,10 @@ def extract_features(df, prefix=""):
 def extract_all_features(symbol_data):
     df_1m = symbol_data.get("1m")
     df_5m = symbol_data.get("5m")
-    
+   
     if df_1m is None or df_1m.empty:
         return None
-        
+       
     # تأكيد وجود عمود التوقيت كـ index أو كـ Column للدمج الزمني
     if "timestamp" not in df_1m.columns and not isinstance(df_1m.index, pd.DatetimeIndex):
         df_1m = df_1m.reset_index()
@@ -139,14 +143,14 @@ def extract_all_features(symbol_data):
         df_5m = df_5m.reset_index()
 
     df_1m_feats = extract_features(df_1m, prefix="1m")
-    
+   
     if df_5m is not None and not df_5m.empty:
         df_5m_feats = extract_features(df_5m, prefix="5m")
-        
+       
         # تصفية الأعمدة التي نريد دمجها فقط لعدم التكرار
         five_m_cols = [col for col in df_5m_feats.columns if col.startswith("5m_")] + ["timestamp"]
         df_5m_filtered = df_5m_feats[five_m_cols]
-        
+       
         # دمج زمني ذكي (يمنع تسريب البيانات مستقبلاً)
         df_1m_feats = pd.merge_asof(
             df_1m_feats.sort_values("timestamp"),
@@ -154,11 +158,11 @@ def extract_all_features(symbol_data):
             on="timestamp",
             direction="backward"
         )
-        
+       
     return df_1m_feats.fillna(0)
 
-FEATURE_NAMES_1M = [f"1m_{x}" for x in ["zscore_20", "zscore_50", "mean_rev_20", "mean_rev_50", "momentum_5", "momentum_10", "momentum_20", "volatility_20", "vol_ratio", "close_position", "price_range", "autocorr", "entropy", "fourier", "returns", "returns_5"]]
-FEATURE_NAMES_5M = [f"5m_{x}" for x in ["zscore_20", "zscore_50", "mean_rev_20", "mean_rev_50", "momentum_5", "momentum_10", "momentum_20", "volatility_20", "vol_ratio", "close_position", "price_range", "autocorr", "entropy", "fourier", "returns", "returns_5"]]
+FEATURE_NAMES_1M = [f"1m_{x}" for x in ["zscore_20", "zscore_50", "mean_rev_20", "mean_rev_50", "momentum_5", "momentum_10", "momentum_20", "volatility_20", "vol_ratio", "close_position", "price_range", "autocorr", "entropy", "fourier", "returns", "returns_5", "mean_20", "std_20"]]
+FEATURE_NAMES_5M = [f"5m_{x}" for x in ["zscore_20", "zscore_50", "mean_rev_20", "mean_rev_50", "momentum_5", "momentum_10", "momentum_20", "volatility_20", "vol_ratio", "close_position", "price_range", "autocorr", "entropy", "fourier", "returns", "returns_5", "mean_20", "std_20"]]
 ALL_FEATURES = FEATURE_NAMES_1M + FEATURE_NAMES_5M
 
 if __name__ == "__main__":
