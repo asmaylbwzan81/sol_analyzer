@@ -53,7 +53,6 @@ async def fetch_candles_async(session, symbol, interval, limit=100):
         return pd.DataFrame()
 
 def get_htf_trend(df_4h: pd.DataFrame) -> str:
-    """تحديد اتجاه H4 بالانحدار الخطي"""
     try:
         if df_4h is None or df_4h.empty or len(df_4h) < 20:
             return "NEUTRAL"
@@ -67,9 +66,7 @@ def get_htf_trend(df_4h: pd.DataFrame) -> str:
     except:
         return "NEUTRAL"
 
-# ✅ [Daily Filter] تحديد اتجاه الديلي لفلتر إضافي أقوى
 def get_daily_trend(df_1d: pd.DataFrame) -> str:
-    """تحديد اتجاه Daily بالانحدار الخطي"""
     try:
         if df_1d is None or df_1d.empty or len(df_1d) < 10:
             return "NEUTRAL"
@@ -136,7 +133,6 @@ async def process_symbol(session, symbol):
         if await is_in_signal_cooldown(symbol):
             return
 
-        # ✅ جلب 4 إطارات زمنية
         df_1m, df_5m, df_4h, df_1d = await asyncio.gather(
             fetch_candles_async(session, symbol, "1m"),
             fetch_candles_async(session, symbol, "5m"),
@@ -193,7 +189,6 @@ async def process_symbol(session, symbol):
 
             final_direction = "LONG" if signal_direction == "BUY" else "SHORT"
 
-            # ✅ فلتر H4
             if final_direction == "SHORT" and htf_trend == "UP":
                 print(f"🛑 [H4 Filter] {symbol} — رفض SHORT لأن H4 صاعد ⬆️")
                 return
@@ -201,7 +196,6 @@ async def process_symbol(session, symbol):
                 print(f"🛑 [H4 Filter] {symbol} — رفض LONG لأن H4 نازل ⬇️")
                 return
 
-            # ✅ فلتر Daily
             if final_direction == "SHORT" and daily_trend == "UP":
                 print(f"🛑 [Daily Filter] {symbol} — رفض SHORT لأن Daily صاعد ⬆️")
                 return
@@ -254,7 +248,11 @@ async def process_symbol(session, symbol):
             else:
                 entry_quality = "middle"
 
+            # ✅ التعديل الوحيد — إضافة signal_id
+            signal_id = f"{symbol.replace('-', '')}-{int(time.time())}"
+
             signal_payload = {
+                "signal_id": signal_id, # ✅
                 "symbol": symbol,
                 "direction": final_direction,
                 "price": round(current_close, precision),
@@ -264,7 +262,7 @@ async def process_symbol(session, symbol):
                 "status": "pending",
                 "market_regime": current_regime,
                 "htf_trend": htf_trend.lower(),
-                "daily_trend": daily_trend.lower(), # ✅ إضافة Daily للـ payload
+                "daily_trend": daily_trend.lower(),
                 "entry_quality": entry_quality,
                 "strategy_id": strategy_id,
                 "quant_metrics": {
@@ -276,7 +274,7 @@ async def process_symbol(session, symbol):
 
             await redis_client.set(f"signal:pending:{symbol}", json.dumps(signal_payload))
             await set_signal_cooldown(symbol)
-            print(f"🎯 إشارة: {symbol} -> {final_direction} | {current_regime.upper()} | H4: {htf_trend} | Daily: {daily_trend}")
+            print(f"🎯 إشارة: {symbol} -> {final_direction} | {current_regime.upper()} | H4: {htf_trend} | Daily: {daily_trend} | ID: {signal_id}")
 
     except Exception as e:
         print(f"❌ خطأ معالجة {symbol}: {e}")
