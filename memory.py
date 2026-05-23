@@ -1,10 +1,8 @@
 import json import time
 
-====================================================
 
  memory.py — ذاكرة بوت التحليل (Redis Async)
 
-====================================================
 
 Expected Redis structure:
 
@@ -12,13 +10,10 @@ signal:memory:{signal_id} -> JSON string
 
 signal:result:{signal_id} -> JSON string
 
-signal:history:{symbol} -> LIST of signal_ids
-
-====================================================
+signal:history:{symbol} -> LIST of signal_i
 
 1. SAVE SIGNAL MEMORY
 
-====================================================
 
 async def save_signal_memory(redis, signal_id: str, signal_data: dict): """ Save signal conditions at time of sending """ key = f"signal:memory:{signal_id}"
 
