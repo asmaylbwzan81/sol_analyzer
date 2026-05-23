@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 from features import extract_all_features
 from news_filter import should_trade
+from memory import save_signal_memory, should_block_signal
 
 load_dotenv()
 
@@ -203,6 +204,11 @@ async def process_symbol(session, symbol):
                 print(f"🛑 [Daily Filter] {symbol} — رفض LONG لأن Daily نازل ⬇️")
                 return
 
+            # ✅ فحص الذاكرة — قبل الإرسال
+            if await should_block_signal(redis_client, symbol, final_direction, current_regime, htf_trend.lower()):
+                print(f"🧠 [Memory] {symbol} — رفض الإشارة، نفس الظروف خسرت قبل")
+                return
+
             precision = get_price_precision(symbol)
 
             if current_regime == "ranging":
@@ -248,11 +254,10 @@ async def process_symbol(session, symbol):
             else:
                 entry_quality = "middle"
 
-            # ✅ التعديل الوحيد — إضافة signal_id
             signal_id = f"{symbol.replace('-', '')}-{int(time.time())}"
 
             signal_payload = {
-                "signal_id": signal_id, # ✅
+                "signal_id": signal_id,
                 "symbol": symbol,
                 "direction": final_direction,
                 "price": round(current_close, precision),
@@ -274,6 +279,10 @@ async def process_symbol(session, symbol):
 
             await redis_client.set(f"signal:pending:{symbol}", json.dumps(signal_payload))
             await set_signal_cooldown(symbol)
+
+            # ✅ حفظ الذاكرة — بعد الإرسال
+            await save_signal_memory(redis_client, signal_id, signal_payload)
+
             print(f"🎯 إشارة: {symbol} -> {final_direction} | {current_regime.upper()} | H4: {htf_trend} | Daily: {daily_trend} | ID: {signal_id}")
 
     except Exception as e:
