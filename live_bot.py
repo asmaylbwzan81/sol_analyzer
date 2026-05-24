@@ -93,8 +93,9 @@ async def get_best_live_strategy_async(symbol, market_regime):
             if isinstance(raw_data, str): strategies.append(json.loads(raw_data))
             else: strategies.append(raw_data)
     if not strategies:
+        # ✅ قيم افتراضية موحّدة مع النطاق الجديد
         return {
-            "params": {"entropy_max": 4.0, "fourier_min": 5.0, "z_trigger": 1.5},
+            "params": {"entropy_max": 0.6, "fourier_min": 0.04, "z_trigger": 1.5},
             "tp_pct": 0.0045,
             "sl_pct": 0.0025,
             "strategy_id": "default_quant_v1"
@@ -162,11 +163,12 @@ async def process_symbol(session, symbol):
         signal_direction = None
 
         if micro_regime == "ranging":
-            # ✅ تعطيل entropy و fourier مؤقتاً — z_trigger فقط
-            if current_zscore >= params['z_trigger']:
-                signal_direction = "SELL"
-            elif current_zscore <= -params['z_trigger']:
-                signal_direction = "BUY"
+            # ✅ تفعيل entropy و fourier بعد الإصلاح
+            if current_entropy <= params['entropy_max'] and current_fourier >= params['fourier_min']:
+                if current_zscore >= params['z_trigger']:
+                    signal_direction = "SELL"
+                elif current_zscore <= -params['z_trigger']:
+                    signal_direction = "BUY"
 
         elif micro_regime == "trending":
             if (macro_daily == "UP" or macro_htf == "UP") and (macro_daily != "DOWN" and macro_htf != "DOWN"):
