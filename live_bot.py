@@ -1,3 +1,6 @@
+
+
+
 import os
 import json
 import asyncio
@@ -86,16 +89,13 @@ async def get_best_live_strategy_async(symbol, market_regime):
         f"strategy_best_2:{coin_clean}:{regime_upper}",
         f"strategy_best_3:{coin_clean}:{regime_upper}"
     ]
-    print(f"🔍 [Strategy] البحث عن: {slots_keys[0]}")
     strategies = []
     for key in slots_keys:
         raw_data = await redis_client.get(key)
         if raw_data:
             if isinstance(raw_data, str): strategies.append(json.loads(raw_data))
             else: strategies.append(raw_data)
-    print(f"📦 [Strategy] عدد الاستراتيجيات لـ {symbol}:{regime_upper} = {len(strategies)}")
     if not strategies:
-        print(f"⚠️ [Strategy] ما لاقى استراتيجية — رجع للافتراضية")
         return {
             "params": {"entropy_max": 4.0, "fourier_min": 5.0, "z_trigger": 1.5},
             "tp_pct": 0.0045,
@@ -132,8 +132,6 @@ async def process_symbol(session, symbol):
         if await is_in_signal_cooldown(symbol):
             return
 
-        print(f"🚀 [Debug] بدء معالجة {symbol}")
-
         df_1m, df_5m, df_4h, df_1d = await asyncio.gather(
             fetch_candles_async(session, symbol, "1m"),
             fetch_candles_async(session, symbol, "5m"),
@@ -142,7 +140,6 @@ async def process_symbol(session, symbol):
         )
 
         if df_1m.empty or df_5m.empty or len(df_1m) < 50:
-            print(f"⚠️ [Debug] {symbol} — بيانات فارغة")
             return
 
         macro_htf = get_htf_trend(df_4h)
@@ -150,7 +147,6 @@ async def process_symbol(session, symbol):
 
         df_features = extract_all_features({"1m": df_1m, "5m": df_5m})
         if df_features is None or df_features.empty:
-            print(f"⚠️ [Debug] {symbol} — features فارغة")
             return
 
         last_row = df_features.iloc[-1]
@@ -160,26 +156,21 @@ async def process_symbol(session, symbol):
         current_entropy = float(last_row["1m_entropy"])
         current_fourier = float(last_row["1m_fourier"])
 
-        print(f"🧠 [Debug] {symbol} | regime={micro_regime} | z={current_zscore:.2f} | entropy={current_entropy:.2f} | fourier={current_fourier:.2f} | H4={macro_htf} | Daily={macro_daily}")
-
         strategy_data = await get_best_live_strategy_async(symbol, micro_regime)
         params = strategy_data["params"]
         tp_pct = float(strategy_data["tp_pct"])
         sl_pct = float(strategy_data["sl_pct"])
         strategy_id = strategy_data.get("strategy_id", "gen_plan_3")
 
-        print(f"🎯 [Debug] {symbol} | params={params}")
-
         signal_direction = None
 
         if micro_regime == "ranging":
-            if current_entropy <= params['entropy_max'] and current_fourier >= params['fourier_min']:
+            # ✅ تعطيل شرط entropy مؤقتاً لأن القيم غير متوافقة
+            if current_fourier >= params['fourier_min']:
                 if current_zscore >= params['z_trigger']:
                     signal_direction = "SELL"
                 elif current_zscore <= -params['z_trigger']:
                     signal_direction = "BUY"
-            else:
-                print(f"❌ [Debug] {symbol} — شروط ranging ما تحققت | entropy={current_entropy:.2f}<={params['entropy_max']} fourier={current_fourier:.2f}>={params['fourier_min']}")
 
         elif micro_regime == "trending":
             if (macro_daily == "UP" or macro_htf == "UP") and (macro_daily != "DOWN" and macro_htf != "DOWN"):
@@ -273,9 +264,6 @@ async def process_symbol(session, symbol):
             await set_signal_cooldown(symbol)
             await save_signal_memory(redis_client, signal_id, signal_payload)
             print(f"🎯 إشارة: {symbol} -> {final_direction} | Micro: {micro_regime.upper()} | H4: {macro_htf} | Daily: {macro_daily} | ID: {signal_id}")
-
-        else:
-            print(f"⏳ [Debug] {symbol} — ما في إشارة | regime={micro_regime} | z={current_zscore:.2f}")
 
     except Exception as e:
         print(f"❌ خطأ معالجة {symbol}: {e}")
