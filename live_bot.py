@@ -93,7 +93,6 @@ async def get_best_live_strategy_async(symbol, market_regime):
             if isinstance(raw_data, str): strategies.append(json.loads(raw_data))
             else: strategies.append(raw_data)
     if not strategies:
-        # ✅ قيم افتراضية موحّدة مع النطاق الجديد
         return {
             "params": {"entropy_max": 0.6, "fourier_min": 0.04, "z_trigger": 1.5},
             "tp_pct": 0.0045,
@@ -163,7 +162,6 @@ async def process_symbol(session, symbol):
         signal_direction = None
 
         if micro_regime == "ranging":
-            # ✅ تفعيل entropy و fourier بعد الإصلاح
             if current_entropy <= params['entropy_max'] and current_fourier >= params['fourier_min']:
                 if current_zscore >= params['z_trigger']:
                     signal_direction = "SELL"
@@ -181,12 +179,15 @@ async def process_symbol(session, symbol):
         if signal_direction:
             final_direction = "LONG" if signal_direction == "BUY" else "SHORT"
 
+            # ✅ Macro Shield + cooldown عند الرفض
             if final_direction == "SHORT" and (macro_htf == "UP" or macro_daily == "UP"):
                 print(f"🛑 [Macro Shield] {symbol} — رفض SHORT لأن الاتجاه الكبير صاعد صريح ⬆️")
+                await set_signal_cooldown(symbol) # ← منع أي إشارة عكسية
                 return
 
             if final_direction == "LONG" and (macro_htf == "DOWN" or macro_daily == "DOWN"):
                 print(f"🛑 [Macro Shield] {symbol} — رفض LONG لأن الاتجاه الكبير هابط صريح ⬇️")
+                await set_signal_cooldown(symbol) # ← منع أي إشارة عكسية
                 return
 
             ok, reason = should_trade(symbol.split("-")[0].lower())
