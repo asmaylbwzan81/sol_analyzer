@@ -1,6 +1,3 @@
-
-
-
 import os
 import json
 import asyncio
@@ -165,12 +162,11 @@ async def process_symbol(session, symbol):
         signal_direction = None
 
         if micro_regime == "ranging":
-            # ✅ تعطيل شرط entropy مؤقتاً لأن القيم غير متوافقة
-            if current_fourier >= params['fourier_min']:
-                if current_zscore >= params['z_trigger']:
-                    signal_direction = "SELL"
-                elif current_zscore <= -params['z_trigger']:
-                    signal_direction = "BUY"
+            # ✅ تعطيل entropy و fourier مؤقتاً — z_trigger فقط
+            if current_zscore >= params['z_trigger']:
+                signal_direction = "SELL"
+            elif current_zscore <= -params['z_trigger']:
+                signal_direction = "BUY"
 
         elif micro_regime == "trending":
             if (macro_daily == "UP" or macro_htf == "UP") and (macro_daily != "DOWN" and macro_htf != "DOWN"):
