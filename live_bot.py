@@ -55,8 +55,7 @@ async def fetch_candles_async(session, symbol, interval, limit=100):
 
 def get_htf_trend(df_4h: pd.DataFrame) -> str:
     try:
-        if df_4h is None or df_4h.empty or len(df_4h) < 20:
-            return "NEUTRAL"
+        if df_4h is None or df_4h.empty or len(df_4h) < 20: return "NEUTRAL"
         y = df_4h["close"].iloc[-20:].values
         x = np.arange(len(y))
         slope, _ = np.polyfit(x, y, 1)
@@ -69,8 +68,7 @@ def get_htf_trend(df_4h: pd.DataFrame) -> str:
 
 def get_daily_trend(df_1d: pd.DataFrame) -> str:
     try:
-        if df_1d is None or df_1d.empty or len(df_1d) < 10:
-            return "NEUTRAL"
+        if df_1d is None or df_1d.empty or len(df_1d) < 10: return "NEUTRAL"
         y = df_1d["close"].iloc[-10:].values
         x = np.arange(len(y))
         slope, _ = np.polyfit(x, y, 1)
@@ -93,10 +91,8 @@ async def get_best_live_strategy_async(symbol, market_regime):
     for key in slots_keys:
         raw_data = await redis_client.get(key)
         if raw_data:
-            if isinstance(raw_data, str):
-                strategies.append(json.loads(raw_data))
-            else:
-                strategies.append(raw_data)
+            if isinstance(raw_data, str): strategies.append(json.loads(raw_data))
+            else: strategies.append(raw_data)
     if not strategies:
         return {
             "params": {"entropy_max": 4.0, "fourier_min": 5.0, "z_trigger": 1.5},
@@ -144,24 +140,26 @@ async def process_symbol(session, symbol):
         if df_1m.empty or df_5m.empty or len(df_1m) < 50:
             return
 
-        htf_trend = get_htf_trend(df_4h)
-        daily_trend = get_daily_trend(df_1d)
-
+        # 🌍 [Macro Trend] الاتجاهات الكبرى الحاكمة
+        macro_htf = get_htf_trend(df_4h)
+        macro_daily = get_daily_trend(df_1d)
+        
         df_features = extract_all_features({"1m": df_1m, "5m": df_5m})
-
         if df_features is None or df_features.empty:
             return
 
         last_row = df_features.iloc[-1]
 
         current_close = float(last_row["close"])
-        current_regime = str(last_row["1m_regime"]).strip().lower()
+        
+        # ⏱️ [Micro Regime] حالة فريم الدقيقة لتحديد التوقيت فقط
+        micro_regime = str(last_row["1m_regime"]).strip().lower()
+        
         current_zscore = float(last_row["1m_zscore_20"])
         current_entropy = float(last_row["1m_entropy"])
         current_fourier = float(last_row["1m_fourier"])
-        current_returns = float(last_row["1m_returns"])
 
-        strategy_data = await get_best_live_strategy_async(symbol, current_regime)
+        strategy_data = await get_best_live_strategy_async(symbol, micro_regime)
         params = strategy_data["params"]
         tp_pct = float(strategy_data["tp_pct"])
         sl_pct = float(strategy_data["sl_pct"])
@@ -169,49 +167,58 @@ async def process_symbol(session, symbol):
 
         signal_direction = None
 
-        if current_regime == "ranging":
+        # 1️⃣ الحالة الأولى: فريم الدقيقة مستقر في تذبذب عرضي (Ranging)
+        if micro_regime == "ranging":
             if current_entropy <= params['entropy_max'] and current_fourier >= params['fourier_min']:
+                # البيع العرضي من القمة
                 if current_zscore >= params['z_trigger']:
                     signal_direction = "SELL"
+                # الشراء العرضي من القاع
                 elif current_zscore <= -params['z_trigger']:
                     signal_direction = "BUY"
 
-        elif current_regime == "trending":
-            if current_zscore > 1.0 and current_returns > 0:
-                signal_direction = "BUY"
-            elif current_zscore < -1.0 and current_returns < 0:
-                signal_direction = "SELL"
+        # 2️⃣ الحالة الثانية المحدثة: فريم الدقيقة في حالة اتجاهية (Trending)
+        elif micro_regime == "trending":
+            # 📈 إذا كان الاتجاه الكبير صاعداً صريحاً (Daily أو H4 صاعد وبشرط ألا يكون الآخر هابطاً)
+            if (macro_daily == "UP" or macro_htf == "UP") and (macro_daily != "DOWN" and macro_htf != "DOWN"):
+                # 🛠️ [Pullback Entry]: نشتري فقط الهبوط المؤقت (الانحراف السلبي للـ Z-Score) داخل الترند الصاعد
+                if current_zscore <= -1.0:
+                    signal_direction = "BUY"
 
+            # 📉 إذا كان الاتجاه الكبير هابطاً صريحاً
+            elif (macro_daily == "DOWN" or macro_htf == "DOWN") and (macro_daily != "UP" and macro_htf != "UP"):
+                # 🛠️ [Pullback Entry]: نبيع شورت فقط الارتفاعات المؤقتة (الانحراف الإيجابي للـ Z-Score) داخل الترند الهابط
+                if current_zscore >= 1.0:
+                    signal_direction = "SELL"
+
+        # 🚨 تطبيق الفلاتر الصارمة لمنع أي خروج عن منطق الماكرو
         if signal_direction:
+            final_direction = "LONG" if signal_direction == "BUY" else "SHORT"
+
+            # حظر دخول شورت نهائياً إذا كانت المؤشرات الكبرى مجمعة على الصعود
+            if final_direction == "SHORT" and (macro_htf == "UP" or macro_daily == "UP"):
+                print(f"🛑 [Macro Shield] {symbol} — رفض SHORT لأن الاتجاه الكبير صاعد صريح ⬆️")
+                return
+            
+            # حظر دخول لونغ نهائياً إذا كانت المؤشرات الكبرى مجمعة على الهبوط
+            if final_direction == "LONG" and (macro_htf == "DOWN" or macro_daily == "DOWN"):
+                print(f"🛑 [Macro Shield] {symbol} — رفض LONG لأن الاتجاه الكبير هابط صريح ⬇️")
+                return
+
             ok, reason = should_trade(symbol.split("-")[0].lower())
             if not ok:
                 print(f"🚫 {symbol} — {reason}")
                 return
 
-            final_direction = "LONG" if signal_direction == "BUY" else "SHORT"
-
-            if final_direction == "SHORT" and htf_trend == "UP":
-                print(f"🛑 [H4 Filter] {symbol} — رفض SHORT لأن H4 صاعد ⬆️")
-                return
-            if final_direction == "LONG" and htf_trend == "DOWN":
-                print(f"🛑 [H4 Filter] {symbol} — رفض LONG لأن H4 نازل ⬇️")
-                return
-
-            if final_direction == "SHORT" and daily_trend == "UP":
-                print(f"🛑 [Daily Filter] {symbol} — رفض SHORT لأن Daily صاعد ⬆️")
-                return
-            if final_direction == "LONG" and daily_trend == "DOWN":
-                print(f"🛑 [Daily Filter] {symbol} — رفض LONG لأن Daily نازل ⬇️")
-                return
-
-            # ✅ فحص الذاكرة — قبل الإرسال
-            if await should_block_signal(redis_client, symbol, final_direction, current_regime, htf_trend.lower()):
-                print(f"🧠 [Memory] {symbol} — رفض الإشارة، نفس الظروف خسرت قبل")
+            # ✅ فحص الذاكرة لمنع تكرار السياقات الفاشلة حياً
+            if await should_block_signal(redis_client, symbol, final_direction, micro_regime, macro_htf.lower()):
+                print(f"🧠 [Memory Blocked] {symbol} — حظر الإشارة لتكرار الفشل في هذا السياق الإحصائي.")
                 return
 
             precision = get_price_precision(symbol)
 
-            if current_regime == "ranging":
+            # 📊 نظام الحسابات التكيفية المطور لديك
+            if micro_regime == "ranging":
                 mean_price = float(last_row.get("1m_mean_20", current_close))
                 std_dev = float(last_row.get("1m_std_20", current_close * 0.0025))
                 volatility_factor = max(1.0, abs(current_zscore))
@@ -230,9 +237,6 @@ async def process_symbol(session, symbol):
                     sl_price = current_close + (std_dev * volatility_factor)
                     if tp_price > current_close * (1 - MIN_TP_PCT): tp_price = current_close * (1 - MIN_TP_PCT)
                     if sl_price < current_close * (1 + MIN_SL_PCT): sl_price = current_close * (1 + MIN_SL_PCT)
-
-                print(f"📊 [Quant Mode Active] أهداف تكيفية إحصائية لحالة التذبذب.")
-
             else:
                 volatility_factor = max(1.0, abs(current_zscore))
                 adaptive_sl_pct = max(0.0065, sl_pct * volatility_factor)
@@ -245,14 +249,9 @@ async def process_symbol(session, symbol):
                     tp_price = current_close * (1 - adaptive_tp_pct)
                     sl_price = current_close * (1 + adaptive_sl_pct)
 
-                print(f"📈 [Trend Mode Active] أهداف مرنة مبنية على الزخم.")
-
-            if abs(current_zscore) >= params.get('z_trigger', 1.5) + 0.5:
-                entry_quality = "early"
-            elif abs(current_zscore) <= params.get('z_trigger', 1.5) - 0.2:
-                entry_quality = "late"
-            else:
-                entry_quality = "middle"
+            if abs(current_zscore) >= params.get('z_trigger', 1.5) + 0.5: entry_quality = "early"
+            elif abs(current_zscore) <= params.get('z_trigger', 1.5) - 0.2: entry_quality = "late"
+            else: entry_quality = "middle"
 
             signal_id = f"{symbol.replace('-', '')}-{int(time.time())}"
 
@@ -265,9 +264,9 @@ async def process_symbol(session, symbol):
                 "sl": round(sl_price, precision),
                 "timestamp": int(time.time()),
                 "status": "pending",
-                "market_regime": current_regime,
-                "htf_trend": htf_trend.lower(),
-                "daily_trend": daily_trend.lower(),
+                "market_regime": micro_regime,
+                "htf_trend": macro_htf.lower(),
+                "daily_trend": macro_daily.lower(),
                 "entry_quality": entry_quality,
                 "strategy_id": strategy_id,
                 "quant_metrics": {
@@ -279,18 +278,15 @@ async def process_symbol(session, symbol):
 
             await redis_client.set(f"signal:pending:{symbol}", json.dumps(signal_payload))
             await set_signal_cooldown(symbol)
-
-            # ✅ حفظ الذاكرة — بعد الإرسال
             await save_signal_memory(redis_client, signal_id, signal_payload)
-
-            print(f"🎯 إشارة: {symbol} -> {final_direction} | {current_regime.upper()} | H4: {htf_trend} | Daily: {daily_trend} | ID: {signal_id}")
+            print(f"🎯 إشارة: {symbol} -> {final_direction} | Micro: {micro_regime.upper()} | H4: {macro_htf} | Daily: {macro_daily} | ID: {signal_id}")
 
     except Exception as e:
         print(f"❌ خطأ معالجة {symbol}: {e}")
 
 async def main():
     print("=" * 65)
-    print("🤖 ASYNC LIVE MONITOR BOT - CLEAN QUANT VERSION")
+    print("🤖 ASYNC LIVE MONITOR BOT - EVOLUTIONARY OMNI VERSION")
     print("=" * 65)
 
     async with aiohttp.ClientSession() as session:
@@ -305,3 +301,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
