@@ -38,7 +38,6 @@ async def fetch_candles_async(session, symbol, interval, limit=100):
                 data = await response.json()
                 candles = data.get("data", [])
                 if not candles: return pd.DataFrame()
-
                 df = pd.DataFrame([{
                     "timestamp": int(c.get("time", 0)),
                     "open": float(c.get("open", 0)),
@@ -87,13 +86,16 @@ async def get_best_live_strategy_async(symbol, market_regime):
         f"strategy_best_2:{coin_clean}:{regime_upper}",
         f"strategy_best_3:{coin_clean}:{regime_upper}"
     ]
+    print(f"🔍 [Strategy] البحث عن: {slots_keys[0]}")
     strategies = []
     for key in slots_keys:
         raw_data = await redis_client.get(key)
         if raw_data:
             if isinstance(raw_data, str): strategies.append(json.loads(raw_data))
             else: strategies.append(raw_data)
+    print(f"📦 [Strategy] عدد الاستراتيجيات لـ {symbol}:{regime_upper} = {len(strategies)}")
     if not strategies:
+        print(f"⚠️ [Strategy] ما لاقى استراتيجية — رجع للافتراضية")
         return {
             "params": {"entropy_max": 4.0, "fourier_min": 5.0, "z_trigger": 1.5},
             "tp_pct": 0.0045,
@@ -130,6 +132,8 @@ async def process_symbol(session, symbol):
         if await is_in_signal_cooldown(symbol):
             return
 
+        print(f"🚀 [Debug] بدء معالجة {symbol}")
+
         df_1m, df_5m, df_4h, df_1d = await asyncio.gather(
             fetch_candles_async(session, symbol, "1m"),
             fetch_candles_async(session, symbol, "5m"),
@@ -138,26 +142,25 @@ async def process_symbol(session, symbol):
         )
 
         if df_1m.empty or df_5m.empty or len(df_1m) < 50:
+            print(f"⚠️ [Debug] {symbol} — بيانات فارغة")
             return
 
-        # 🌍 [Macro Trend] الاتجاهات الكبرى الحاكمة
         macro_htf = get_htf_trend(df_4h)
         macro_daily = get_daily_trend(df_1d)
-        
+
         df_features = extract_all_features({"1m": df_1m, "5m": df_5m})
         if df_features is None or df_features.empty:
+            print(f"⚠️ [Debug] {symbol} — features فارغة")
             return
 
         last_row = df_features.iloc[-1]
-
         current_close = float(last_row["close"])
-        
-        # ⏱️ [Micro Regime] حالة فريم الدقيقة لتحديد التوقيت فقط
         micro_regime = str(last_row["1m_regime"]).strip().lower()
-        
         current_zscore = float(last_row["1m_zscore_20"])
         current_entropy = float(last_row["1m_entropy"])
         current_fourier = float(last_row["1m_fourier"])
+
+        print(f"🧠 [Debug] {symbol} | regime={micro_regime} | z={current_zscore:.2f} | entropy={current_entropy:.2f} | fourier={current_fourier:.2f} | H4={macro_htf} | Daily={macro_daily}")
 
         strategy_data = await get_best_live_strategy_async(symbol, micro_regime)
         params = strategy_data["params"]
@@ -165,42 +168,34 @@ async def process_symbol(session, symbol):
         sl_pct = float(strategy_data["sl_pct"])
         strategy_id = strategy_data.get("strategy_id", "gen_plan_3")
 
+        print(f"🎯 [Debug] {symbol} | params={params}")
+
         signal_direction = None
 
-        # 1️⃣ الحالة الأولى: فريم الدقيقة مستقر في تذبذب عرضي (Ranging)
         if micro_regime == "ranging":
             if current_entropy <= params['entropy_max'] and current_fourier >= params['fourier_min']:
-                # البيع العرضي من القمة
                 if current_zscore >= params['z_trigger']:
                     signal_direction = "SELL"
-                # الشراء العرضي من القاع
                 elif current_zscore <= -params['z_trigger']:
                     signal_direction = "BUY"
+            else:
+                print(f"❌ [Debug] {symbol} — شروط ranging ما تحققت | entropy={current_entropy:.2f}<={params['entropy_max']} fourier={current_fourier:.2f}>={params['fourier_min']}")
 
-        # 2️⃣ الحالة الثانية المحدثة: فريم الدقيقة في حالة اتجاهية (Trending)
         elif micro_regime == "trending":
-            # 📈 إذا كان الاتجاه الكبير صاعداً صريحاً (Daily أو H4 صاعد وبشرط ألا يكون الآخر هابطاً)
             if (macro_daily == "UP" or macro_htf == "UP") and (macro_daily != "DOWN" and macro_htf != "DOWN"):
-                # 🛠️ [Pullback Entry]: نشتري فقط الهبوط المؤقت (الانحراف السلبي للـ Z-Score) داخل الترند الصاعد
                 if current_zscore <= -1.0:
                     signal_direction = "BUY"
-
-            # 📉 إذا كان الاتجاه الكبير هابطاً صريحاً
             elif (macro_daily == "DOWN" or macro_htf == "DOWN") and (macro_daily != "UP" and macro_htf != "UP"):
-                # 🛠️ [Pullback Entry]: نبيع شورت فقط الارتفاعات المؤقتة (الانحراف الإيجابي للـ Z-Score) داخل الترند الهابط
                 if current_zscore >= 1.0:
                     signal_direction = "SELL"
 
-        # 🚨 تطبيق الفلاتر الصارمة لمنع أي خروج عن منطق الماكرو
         if signal_direction:
             final_direction = "LONG" if signal_direction == "BUY" else "SHORT"
 
-            # حظر دخول شورت نهائياً إذا كانت المؤشرات الكبرى مجمعة على الصعود
             if final_direction == "SHORT" and (macro_htf == "UP" or macro_daily == "UP"):
                 print(f"🛑 [Macro Shield] {symbol} — رفض SHORT لأن الاتجاه الكبير صاعد صريح ⬆️")
                 return
-            
-            # حظر دخول لونغ نهائياً إذا كانت المؤشرات الكبرى مجمعة على الهبوط
+
             if final_direction == "LONG" and (macro_htf == "DOWN" or macro_daily == "DOWN"):
                 print(f"🛑 [Macro Shield] {symbol} — رفض LONG لأن الاتجاه الكبير هابط صريح ⬇️")
                 return
@@ -210,14 +205,12 @@ async def process_symbol(session, symbol):
                 print(f"🚫 {symbol} — {reason}")
                 return
 
-            # ✅ فحص الذاكرة لمنع تكرار السياقات الفاشلة حياً
             if await should_block_signal(redis_client, symbol, final_direction, micro_regime, macro_htf.lower()):
                 print(f"🧠 [Memory Blocked] {symbol} — حظر الإشارة لتكرار الفشل في هذا السياق الإحصائي.")
                 return
 
             precision = get_price_precision(symbol)
 
-            # 📊 نظام الحسابات التكيفية المطور لديك
             if micro_regime == "ranging":
                 mean_price = float(last_row.get("1m_mean_20", current_close))
                 std_dev = float(last_row.get("1m_std_20", current_close * 0.0025))
@@ -280,6 +273,9 @@ async def process_symbol(session, symbol):
             await set_signal_cooldown(symbol)
             await save_signal_memory(redis_client, signal_id, signal_payload)
             print(f"🎯 إشارة: {symbol} -> {final_direction} | Micro: {micro_regime.upper()} | H4: {macro_htf} | Daily: {macro_daily} | ID: {signal_id}")
+
+        else:
+            print(f"⏳ [Debug] {symbol} — ما في إشارة | regime={micro_regime} | z={current_zscore:.2f}")
 
     except Exception as e:
         print(f"❌ خطأ معالجة {symbol}: {e}")
