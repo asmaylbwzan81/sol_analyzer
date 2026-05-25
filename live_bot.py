@@ -189,15 +189,15 @@ async def process_symbol(session, symbol):
 
         # zscore filter حسب regime
         if micro_regime == "ranging":
-            min_z = 0.5
+            min_z = 0.35
         else:
-            min_z = 0.9
+            min_z = 0.65
         if abs(current_zscore) < min_z:
             return
 
         # ✅ 1. confidence gate محسّن — entropy عالي = سوق noisy = confidence أقل
         confidence = abs(current_zscore) * (2 - current_entropy)
-        if confidence < 1.2:
+        if confidence < 0.8:
             return
 
         strategy_data = await get_best_live_strategy_async(symbol, micro_regime)
