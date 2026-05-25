@@ -117,10 +117,34 @@ async def is_in_signal_cooldown(symbol) -> bool:
         print(f"⚠️ تنبيه فحص الكول داون لـ {symbol}: {e}")
     return False
 
-async def set_signal_cooldown(symbol):
+async def set_signal_cooldown(symbol, multiplier=1):
+    """✅ cooldown backoff — يزيد تلقائياً لو خسارة متكررة"""
     try:
         key = f"last_signal:{symbol}"
+        cooldown = SIGNAL_COOLDOWN * multiplier
         await redis_client.set(key, str(int(time.time())))
+        await redis_client.expire(key, cooldown)
+    except:
+        pass
+
+async def get_loss_streak(symbol) -> int:
+    """✅ يحسب عدد الخسائر المتتالية من Redis"""
+    try:
+        key = f"loss_streak:{symbol}"
+        val = await redis_client.get(key)
+        return int(val) if val else 0
+    except:
+        return 0
+
+async def update_loss_streak(symbol, win: bool):
+    """✅ يحدث streak الخسارة"""
+    try:
+        key = f"loss_streak:{symbol}"
+        if win:
+            await redis_client.set(key, "0")
+        else:
+            streak = await get_loss_streak(symbol)
+            await redis_client.set(key, str(streak + 1))
     except:
         pass
 
@@ -153,11 +177,44 @@ async def process_symbol(session, symbol):
         current_entropy = float(last_row["1m_entropy"])
         current_fourier = float(last_row["1m_fourier"])
 
+        # ✅ حماية NaN/inf
+        if not np.isfinite(current_zscore): return
+        if not np.isfinite(current_entropy): return
+        if not np.isfinite(current_fourier): return
+
+        # ⚡ فلتر السوق المتقلب
+        if micro_regime == "volatile":
+            print(f"⚡ {symbol} — تجاهل السوق المتقلب")
+            return
+
+        # zscore filter حسب regime
+        if micro_regime == "ranging":
+            min_z = 0.5
+        else:
+            min_z = 0.9
+        if abs(current_zscore) < min_z:
+            return
+
+        # ✅ 1. confidence gate محسّن — entropy عالي = سوق noisy = confidence أقل
+        confidence = abs(current_zscore) * (2 - current_entropy)
+        if confidence < 1.2:
+            return
+
         strategy_data = await get_best_live_strategy_async(symbol, micro_regime)
+
+        # strategy validation
+        if "params" not in strategy_data:
+            return
+        if not isinstance(strategy_data.get("params"), dict):
+            return
+
         params = strategy_data["params"]
         tp_pct = float(strategy_data["tp_pct"])
         sl_pct = float(strategy_data["sl_pct"])
         strategy_id = strategy_data.get("strategy_id", "gen_plan_3")
+
+        # trend confirmation
+        trend_confirmed = (macro_daily == macro_htf) and macro_htf != "NEUTRAL"
 
         signal_direction = None
 
@@ -169,25 +226,23 @@ async def process_symbol(session, symbol):
                     signal_direction = "BUY"
 
         elif micro_regime == "trending":
-            if (macro_daily == "UP" or macro_htf == "UP") and (macro_daily != "DOWN" and macro_htf != "DOWN"):
-                if current_zscore <= -1.0:
-                    signal_direction = "BUY"
-            elif (macro_daily == "DOWN" or macro_htf == "DOWN") and (macro_daily != "UP" and macro_htf != "UP"):
-                if current_zscore >= 1.0:
-                    signal_direction = "SELL"
+            if not trend_confirmed:
+                return
+            if macro_htf == "UP" and current_zscore <= -1.0:
+                signal_direction = "BUY"
+            elif macro_htf == "DOWN" and current_zscore >= 1.0:
+                signal_direction = "SELL"
 
         if signal_direction:
             final_direction = "LONG" if signal_direction == "BUY" else "SHORT"
 
-            # ✅ Macro Shield + cooldown عند الرفض
+            # Macro Shield — بدون cooldown عند الرفض
             if final_direction == "SHORT" and (macro_htf == "UP" or macro_daily == "UP"):
-                print(f"🛑 [Macro Shield] {symbol} — رفض SHORT لأن الاتجاه الكبير صاعد صريح ⬆️")
-                await set_signal_cooldown(symbol) # ← منع أي إشارة عكسية
+                print(f"🛑 [Macro Shield] {symbol} — رفض SHORT ⬆️")
                 return
 
             if final_direction == "LONG" and (macro_htf == "DOWN" or macro_daily == "DOWN"):
-                print(f"🛑 [Macro Shield] {symbol} — رفض LONG لأن الاتجاه الكبير هابط صريح ⬇️")
-                await set_signal_cooldown(symbol) # ← منع أي إشارة عكسية
+                print(f"🛑 [Macro Shield] {symbol} — رفض LONG ⬇️")
                 return
 
             ok, reason = should_trade(symbol.split("-")[0].lower())
@@ -195,35 +250,58 @@ async def process_symbol(session, symbol):
                 print(f"🚫 {symbol} — {reason}")
                 return
 
-            if await should_block_signal(redis_client, symbol, final_direction, micro_regime, macro_htf.lower()):
-                print(f"🧠 [Memory Blocked] {symbol} — حظر الإشارة لتكرار الفشل في هذا السياق الإحصائي.")
-                return
+            try:
+                blocked = await should_block_signal(redis_client, symbol, final_direction, micro_regime, macro_htf.lower())
+                if blocked:
+                    print(f"🧠 [Memory Blocked] {symbol} — حظر الإشارة.")
+                    return
+            except Exception as e:
+                print(f"⚠️ Memory check failed: {e}")
 
             precision = get_price_precision(symbol)
+
+            # entry quality
+            if abs(current_zscore) >= params.get('z_trigger', 1.5) + 0.5:
+                entry_quality = "early"
+            elif abs(current_zscore) <= params.get('z_trigger', 1.5) - 0.2:
+                entry_quality = "late"
+            else:
+                entry_quality = "middle"
+
+            # ✅ 2. vol_factor محسّن مع entropy خفيف
+            vol_factor = min(max(abs(current_zscore), 1.0), 2.0)
+            vol_factor *= (1 + current_entropy * 0.5)
+            vol_factor = min(vol_factor, 2.0)
+
+            # Risk Multiplier
+            if abs(current_zscore) > 2.0:
+                risk_mult = 1.2
+            elif abs(current_zscore) < 1.2:
+                risk_mult = 0.8
+            else:
+                risk_mult = 1.0
 
             if micro_regime == "ranging":
                 mean_price = float(last_row.get("1m_mean_20", current_close))
                 std_dev = float(last_row.get("1m_std_20", current_close * 0.0025))
-                volatility_factor = max(1.0, abs(current_zscore))
                 MIN_SL_PCT = 0.0065
                 MIN_TP_PCT = 0.0100
 
                 if final_direction == "LONG":
                     distance_to_mean = max(0.0, mean_price - current_close)
                     tp_price = current_close + (distance_to_mean * 0.8)
-                    sl_price = current_close - (std_dev * volatility_factor)
+                    sl_price = current_close - (std_dev * vol_factor)
                     if tp_price < current_close * (1 + MIN_TP_PCT): tp_price = current_close * (1 + MIN_TP_PCT)
                     if sl_price > current_close * (1 - MIN_SL_PCT): sl_price = current_close * (1 - MIN_SL_PCT)
                 else:
                     distance_to_mean = max(0.0, current_close - mean_price)
                     tp_price = current_close - (distance_to_mean * 0.8)
-                    sl_price = current_close + (std_dev * volatility_factor)
+                    sl_price = current_close + (std_dev * vol_factor)
                     if tp_price > current_close * (1 - MIN_TP_PCT): tp_price = current_close * (1 - MIN_TP_PCT)
                     if sl_price < current_close * (1 + MIN_SL_PCT): sl_price = current_close * (1 + MIN_SL_PCT)
             else:
-                volatility_factor = max(1.0, abs(current_zscore))
-                adaptive_sl_pct = max(0.0065, sl_pct * volatility_factor)
-                adaptive_tp_pct = max(0.0100, tp_pct * volatility_factor)
+                adaptive_tp_pct = tp_pct * vol_factor * risk_mult
+                adaptive_sl_pct = sl_pct * vol_factor * risk_mult
 
                 if final_direction == "LONG":
                     tp_price = current_close * (1 + adaptive_tp_pct)
@@ -231,10 +309,6 @@ async def process_symbol(session, symbol):
                 else:
                     tp_price = current_close * (1 - adaptive_tp_pct)
                     sl_price = current_close * (1 + adaptive_sl_pct)
-
-            if abs(current_zscore) >= params.get('z_trigger', 1.5) + 0.5: entry_quality = "early"
-            elif abs(current_zscore) <= params.get('z_trigger', 1.5) - 0.2: entry_quality = "late"
-            else: entry_quality = "middle"
 
             signal_id = f"{symbol.replace('-', '')}-{int(time.time())}"
 
@@ -260,9 +334,14 @@ async def process_symbol(session, symbol):
             }
 
             await redis_client.set(f"signal:pending:{symbol}", json.dumps(signal_payload))
-            await set_signal_cooldown(symbol)
+
+            # ✅ 3. cooldown backoff حسب streak الخسارة
+            loss_streak = await get_loss_streak(symbol)
+            cooldown_mult = min(loss_streak + 1, 3) # max 3x = 45 دقيقة
+            await set_signal_cooldown(symbol, multiplier=cooldown_mult)
+
             await save_signal_memory(redis_client, signal_id, signal_payload)
-            print(f"🎯 إشارة: {symbol} -> {final_direction} | Micro: {micro_regime.upper()} | H4: {macro_htf} | Daily: {macro_daily} | ID: {signal_id}")
+            print(f"🎯 إشارة: {symbol} -> {final_direction} | Micro: {micro_regime.upper()} | H4: {macro_htf} | Daily: {macro_daily} | Cooldown: {cooldown_mult}x | ID: {signal_id}")
 
     except Exception as e:
         print(f"❌ خطأ معالجة {symbol}: {e}")
@@ -279,7 +358,8 @@ async def main():
             await asyncio.gather(*tasks)
 
             elapsed = time.time() - start_time
-            sleep_time = max(0, 60 - elapsed)
+            # jitter بسيط
+            sleep_time = max(45, min(75, 60 + int(np.random.randint(-10, 10))))
             await asyncio.sleep(sleep_time)
 
 if __name__ == "__main__":
