@@ -53,16 +53,14 @@ def calc_autocorrelation(series, window=WINDOW_SHORT):
 def _rolling_entropy(x):
     """
     ✅ حساب الأنتروبي الموحّد بين 0 و1
-    الإصلاح: استخدام histogram عادي + normalize يدوي بدل density=True
-    density=True كان يرجع probability density وليس probability → قيم ضخمة وسالبة
     """
     returns = np.diff(x) / (x[:-1] + 1e-10)
     hist, _ = np.histogram(returns, bins=10)
     hist = hist + 1e-10
-    probs = hist / hist.sum() # ← normalize صحيح
+    probs = hist / hist.sum()
     entropy = float(-np.sum(probs * np.log(probs)))
-    max_entropy = np.log(10) # ← أقصى قيمة ممكنة (log bins)
-    return entropy / max_entropy # ← النتيجة دائماً بين 0 و1
+    max_entropy = np.log(10)
+    return entropy / max_entropy
 
 def calc_entropy(series, window=WINDOW_SHORT):
     return series.rolling(window).apply(_rolling_entropy, raw=True).fillna(0)
@@ -70,8 +68,6 @@ def calc_entropy(series, window=WINDOW_SHORT):
 def _rolling_fourier(x):
     """
     ✅ حساب طيف فورير الموحّد بين 0 و1
-    الإصلاح: تقييد النتيجة بسقف واقعي (50) بدل إرجاع نسبة max/mean مباشرة
-    النسبة الخام كانت تطلع 18000-55000 → تمنع أي إشارة
     """
     N = len(x)
     chunk_detrended = x - np.mean(x)
@@ -81,23 +77,38 @@ def _rolling_fourier(x):
         return 0.0
     mean_val = np.mean(half_vals)
     raw = float(np.max(half_vals) / (mean_val + 1e-10))
-    return min(raw / 50.0, 1.0) # ← normalize، 50 سقف واقعي
+    return min(raw / 50.0, 1.0)
 
 def calc_fourier_strength(series, window=WINDOW_SHORT):
     return series.rolling(window).apply(_rolling_fourier, raw=True).fillna(0)
 
 # ══════════════════════════════
-# كشف حالة السوق (Regime Detection)
+# كشف حالة السوق (Regime Detection) ✅ Balanced Version
 # ══════════════════════════════
-def detect_regime(df, window=WINDOW_LONG):
+def detect_regime(df, window=50):
     returns = df["close"].pct_change()
+
+    # 📊 Volatility
     vol = returns.rolling(window).std()
     vol_mean = vol.rolling(window * 2).mean()
-    trend = (df["close"].rolling(window).mean().pct_change(10)).abs()
 
+    # 📈 Trend strength
+    price = df["close"]
+    trend_strength = price.pct_change(window)
+
+    # smoother signal لتقليل noise
+    trend_signal = trend_strength.rolling(window).mean()
+
+    # default regime
     regime = pd.Series("ranging", index=df.index)
-    regime[trend > 0.005] = "trending"
-    regime[vol > vol_mean * 2] = "volatile"
+
+    # 🔥 trending (up + down)
+    regime[trend_signal > 0.002] = "trending"
+    regime[trend_signal < -0.002] = "trending"
+
+    # ⚠️ volatile أولوية أعلى من trending
+    regime[vol > vol_mean * 1.8] = "volatile"
+
     return regime
 
 # ══════════════════════════════
@@ -130,7 +141,6 @@ def extract_features(df, prefix=""):
     df[f"{p}returns_5"] = close.pct_change(5)
     df[f"{p}regime"] = detect_regime(df)
 
-    # fillna للأرقام فقط، مع الحفاظ على regime كـ string
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     df[numeric_cols] = df[numeric_cols].fillna(0)
     return df
@@ -165,7 +175,6 @@ def extract_all_features(symbol_data):
             direction="backward"
         )
 
-    # fillna للأرقام فقط بعد الدمج، مع الحفاظ على regime كـ string
     numeric_cols = df_1m_feats.select_dtypes(include=[np.number]).columns
     df_1m_feats[numeric_cols] = df_1m_feats[numeric_cols].fillna(0)
 
@@ -180,4 +189,5 @@ if __name__ == "__main__":
     print(f"🚀 المحرك فائق السرعة جاهز: تم استخراج {len(ALL_FEATURES)} خصائص احتمالية.")
     print("✅ entropy موحّد: 0.0 → 1.0")
     print("✅ fourier موحّد: 0.0 → 1.0")
+    print("✅ detect_regime Balanced Version — trending threshold ±0.002")
 
