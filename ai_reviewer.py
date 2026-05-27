@@ -1,3 +1,5 @@
+أنا
+
 """
 # ============================================================
 # 🧠 AI Advisors System (v2 - Observer Mode)
@@ -22,15 +24,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-MIN_CONFIDENCE_FOR_REVIEW = 0.75
 DB = "ai_feedback.db"
 
 # ✅ Observer Mode — لما True، AI يعطي رأيه بس ما يأثر على القرار
 OBSERVER_MODE = True
 
-# ✅ حدود التأثير على confidence
-MAX_RISK_ADJUSTMENT = 0.10 # Groq: -0.10 إلى +0.10
-MAX_QUALITY_ADJUSTMENT = 0.10 # Llama: -0.10 إلى +0.10
+# ✅ حدود التأثير الجديدة على confidence لرؤية تفاعل أوضح
+MAX_RISK_ADJUSTMENT = 0.25 # Groq: -0.25 إلى +0.25
+MAX_QUALITY_ADJUSTMENT = 0.25 # Llama: -0.25 إلى +0.25
 
 # ══════════════════════════════
 # DB INIT
@@ -135,7 +136,7 @@ def _build_groq_prompt(price, direction, features):
 
 أجب بصيغة JSON فقط:
 {{
-  "risk_adjustment": -0.10 إلى +0.10,
+  "risk_adjustment": -0.25 إلى +0.25,
   "risk_level": "low" أو "medium" أو "high",
   "comment": "تعليق قصير بالعربي"
 }}
@@ -144,7 +145,7 @@ def _build_groq_prompt(price, direction, features):
 - مخاطر عالية (vol_ratio > 1.5, entropy > 0.7) → risk_adjustment سالب
 - مخاطر منخفضة (entropy < 0.4, vol مستقر) → risk_adjustment موجب
 - متوسط → 0.0
-- لا تتجاوز ±0.10
+- لا تتجاوز ±0.25
 """
 
 # ══════════════════════════════
@@ -170,7 +171,7 @@ def _build_llama_prompt(price, direction, features):
 
 أجب بصيغة JSON فقط:
 {{
-  "quality_adjustment": -0.10 إلى +0.10,
+  "quality_adjustment": -0.25 إلى +0.25,
   "setup_quality": "poor" أو "fair" أو "good" أو "excellent",
   "comment": "تعليق قصير بالعربي"
 }}
@@ -180,7 +181,7 @@ def _build_llama_prompt(price, direction, features):
 - تضارب الفريمات → quality_adjustment سالب
 - mean reversion واضح → موجب
 - timing سيئ → سالب
-- لا تتجاوز ±0.10
+- لا تتجاوز ±0.25
 """
 
 # ══════════════════════════════
@@ -189,7 +190,6 @@ def _build_llama_prompt(price, direction, features):
 def _parse_json_response(text, default_adj=0.0, default_level="medium"):
     """يحاول استخراج JSON من رد الـ AI باستخدام Regex آمن ومحصن"""
     try:
-        # البحث الذكي والآمن عن أول وآخر قوس مجعد لتفادي أي نصوص زائدة أو علامات ملونة
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
             json_str = match.group(0)
@@ -219,7 +219,7 @@ def _review_groq(price, direction, features):
     while time.time() < deadline:
         try:
             res = requests.post(
-                "[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)",
+                "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
                 json={
                     "model": "llama-3.1-8b-instant",
@@ -236,20 +236,16 @@ def _review_groq(price, direction, features):
                 return {"risk_adjustment": 0.0, "risk_level": "unknown", "comment": "خطأ API"}
 
             text = data["choices"][0]["message"]["content"]
-            
-            # ✅ طباعة الـ Debug المؤقت للرد الخام من Groq
             print("RAW AI RESPONSE (Groq):", text)
 
             parsed = _parse_json_response(text)
 
-            # استخراج القيم مع حماية
             risk_adj = float(parsed.get("risk_adjustment", parsed.get("adjustment", 0.0)))
             risk_adj = max(-MAX_RISK_ADJUSTMENT, min(MAX_RISK_ADJUSTMENT, risk_adj))
 
             risk_level = str(parsed.get("risk_level", parsed.get("level", "medium"))).lower()
             comment = str(parsed.get("comment", ""))[:100]
 
-            # ✅ طباعة تعليق جروق بسطر مستقل تماماً
             print(f"🤖 Groq [Risk] → adj={risk_adj:+.2f} | level={risk_level} | {comment}")
 
             return {
@@ -279,7 +275,7 @@ def _review_llama(price, direction, features):
     while time.time() < deadline:
         try:
             res = requests.post(
-                "[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)",
+                "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
                 json={
                     "model": "llama-3.3-70b-versatile",
@@ -296,8 +292,6 @@ def _review_llama(price, direction, features):
                 return {"quality_adjustment": 0.0, "setup_quality": "unknown", "comment": "خطأ API"}
 
             text = data["choices"][0]["message"]["content"]
-            
-            # ✅ طباعة الـ Debug المؤقت للرد الخام من Llama
             print("RAW AI RESPONSE (Llama):", text)
 
             parsed = _parse_json_response(text)
@@ -308,7 +302,6 @@ def _review_llama(price, direction, features):
             setup_quality = str(parsed.get("setup_quality", parsed.get("level", "fair"))).lower()
             comment = str(parsed.get("comment", ""))[:100]
 
-            # ✅ طباعة تعليق ليما بسطر مستقل ومنفصل تماماً
             print(f"🦙 Llama [Quality] → adj={quality_adj:+.2f} | quality={setup_quality} | {comment}")
 
             return {
@@ -329,34 +322,40 @@ def _review_llama(price, direction, features):
 # ══════════════════════════════
 def review(row, final_score, direction, price, pattern_stats=None):
     """
-    ✅ الدالة الرئيسية — AI كمستشارين فقط
-   
-    Returns:
-        verdict: دائماً "APPROVE" (لأن AI ما يمنع)
-        reason: ملخص النتيجة
-        groq_comment: تعليق Groq
-        llama_comment: تعليق Llama
+    ✅ الدالة الرئيسية المحدثة — التفاعل فقط إذا كانت الثقة >= 0.50
     """
     if direction not in ("LONG", "SHORT"):
         return "APPROVE", "اتجاه غير واضح — تجاهل AI", "", ""
 
-    # تجهيز Features
-    features = _prepare_features(row)
+    base_confidence = float(final_score)
 
-    # ═══ Groq Risk Review ═══
-    groq_result = _review_groq(price, direction, features)
-    groq_adj = groq_result["risk_adjustment"]
-    groq_risk = groq_result["risk_level"]
-    groq_comment = groq_result["comment"]
+    # 🎯 شرط الذكاء الاصطناعي الصارم: يتفاعل فقط إذا كانت الثقة تساوي 0.50 أو أعلى، وإلا يرجع 0
+    if base_confidence >= 0.50:
+        # تجهيز Features
+        features = _prepare_features(row)
 
-    # ═══ Llama Quality Review ═══
-    llama_result = _review_llama(price, direction, features)
-    llama_adj = llama_result["quality_adjustment"]
-    llama_quality = llama_result["setup_quality"]
-    llama_comment = llama_result["comment"]
+        # ═══ Groq Risk Review ═══
+        groq_result = _review_groq(price, direction, features)
+        groq_adj = groq_result["risk_adjustment"]
+        groq_risk = groq_result["risk_level"]
+        groq_comment = groq_result["comment"]
+
+        # ═══ Llama Quality Review ═══
+        llama_result = _review_llama(price, direction, features)
+        llama_adj = llama_result["quality_adjustment"]
+        llama_quality = llama_result["setup_quality"]
+        llama_comment = llama_result["comment"]
+    else:
+        # 🛡️ حماية وتوفير للـ API: الثقة منخفضة جداً أقل من 0.50، التعديل صفر تلقائياً
+        print(f"⚠️ الثقة الأساسية منخفضة جداً ({base_confidence:.2f} < 0.50) | تم تجاهل استدعاء المستشارين وإرجاع 0")
+        groq_adj = 0.0
+        llama_adj = 0.0
+        groq_risk = "unknown"
+        llama_quality = "unknown"
+        groq_comment = "تخطي - الثقة منخفضة جداً"
+        llama_comment = "تخطي - الثقة منخفضة جداً"
 
     # ═══ حساب Confidence النهائي ═══
-    base_confidence = float(final_score)
     final_confidence = base_confidence + groq_adj + llama_adj
     final_confidence = max(0.0, min(1.0, final_confidence))
 
@@ -377,7 +376,7 @@ def review(row, final_score, direction, price, pattern_stats=None):
         return "APPROVE", reason, groq_comment, llama_comment
 
     # ═══ خارج Observer Mode — نتحقق من threshold ═══
-    threshold = 0.50 # threshold قابل للتعديل لاحقاً
+    threshold = 0.50 
     if final_confidence >= threshold:
         reason = f"✅ AI Advisors | Final={final_confidence:.2f}"
         return "APPROVE", reason, groq_comment, llama_comment
@@ -389,7 +388,6 @@ def review(row, final_score, direction, price, pattern_stats=None):
 # دوال للتوافق مع النظام القديم
 # ══════════════════════════════
 def get_ai_accuracy(window=100):
-    """دقة AI من البيانات المسجلة"""
     try:
         conn = sqlite3.connect(DB)
         c = conn.cursor()
