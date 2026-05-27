@@ -16,6 +16,7 @@ import os
 import time
 import json
 import sqlite3
+import re # تم استيرادها لدعم الـ Parsing المطور والآمن بقوة الـ Regex
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -63,7 +64,7 @@ def log_ai_decision(groq_adj, llama_adj, base_conf, final_conf,
     try:
         conn = sqlite3.connect(DB)
         c = conn.cursor()
-        c.execute("""INSERT INTO ai_feedback 
+        c.execute("""INSERT INTO ai_feedback
                      (groq_adjustment, llama_adjustment, base_confidence, final_confidence,
                       groq_risk_level, llama_setup_quality, profit, correct, timestamp)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -130,6 +131,8 @@ def _build_groq_prompt(price, direction, features):
 
 ⚠️ مهمتك: تقييم المخاطر فقط (لست متخذ قرار)
 
+⚠️ يجب أن يكون الرد JSON فقط بدون أي شرح أو مقدمات أو markdown أو علامات ```.
+
 أجب بصيغة JSON فقط:
 {{
   "risk_adjustment": -0.10 إلى +0.10,
@@ -163,6 +166,8 @@ def _build_llama_prompt(price, direction, features):
 
 ⚠️ مهمتك: تقييم جودة الدخول فقط (لست متخذ قرار)
 
+⚠️ يجب أن يكون الرد JSON فقط بدون أي شرح أو مقدمات أو markdown أو علامات ```.
+
 أجب بصيغة JSON فقط:
 {{
   "quality_adjustment": -0.10 إلى +0.10,
@@ -182,13 +187,12 @@ def _build_llama_prompt(price, direction, features):
 # تحليل JSON Response
 # ══════════════════════════════
 def _parse_json_response(text, default_adj=0.0, default_level="medium"):
-    """يحاول استخراج JSON من رد الـ AI"""
+    """يحاول استخراج JSON من رد الـ AI باستخدام Regex آمن ومحصن"""
     try:
-        # نحاول نلاقي JSON في النص
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1:
-            json_str = text[start:end+1]
+        # البحث الذكي والآمن عن أول وآخر قوس مجعد لتفادي أي نصوص زائدة أو علامات ملونة
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            json_str = match.group(0)
             data = json.loads(json_str)
             return data
     except:
@@ -215,7 +219,7 @@ def _review_groq(price, direction, features):
     while time.time() < deadline:
         try:
             res = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
+                "[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)",
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
                 json={
                     "model": "llama-3.1-8b-instant",
@@ -232,15 +236,20 @@ def _review_groq(price, direction, features):
                 return {"risk_adjustment": 0.0, "risk_level": "unknown", "comment": "خطأ API"}
 
             text = data["choices"][0]["message"]["content"]
+            
+            # ✅ طباعة الـ Debug المؤقت للرد الخام من Groq
+            print("RAW AI RESPONSE (Groq):", text)
+
             parsed = _parse_json_response(text)
 
             # استخراج القيم مع حماية
-            risk_adj = float(parsed.get("risk_adjustment", 0.0))
+            risk_adj = float(parsed.get("risk_adjustment", parsed.get("adjustment", 0.0)))
             risk_adj = max(-MAX_RISK_ADJUSTMENT, min(MAX_RISK_ADJUSTMENT, risk_adj))
 
-            risk_level = str(parsed.get("risk_level", "medium")).lower()
+            risk_level = str(parsed.get("risk_level", parsed.get("level", "medium"))).lower()
             comment = str(parsed.get("comment", ""))[:100]
 
+            # ✅ طباعة تعليق جروق بسطر مستقل تماماً
             print(f"🤖 Groq [Risk] → adj={risk_adj:+.2f} | level={risk_level} | {comment}")
 
             return {
@@ -270,7 +279,7 @@ def _review_llama(price, direction, features):
     while time.time() < deadline:
         try:
             res = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
+                "[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)",
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
                 json={
                     "model": "llama-3.3-70b-versatile",
@@ -287,14 +296,19 @@ def _review_llama(price, direction, features):
                 return {"quality_adjustment": 0.0, "setup_quality": "unknown", "comment": "خطأ API"}
 
             text = data["choices"][0]["message"]["content"]
+            
+            # ✅ طباعة الـ Debug المؤقت للرد الخام من Llama
+            print("RAW AI RESPONSE (Llama):", text)
+
             parsed = _parse_json_response(text)
 
-            quality_adj = float(parsed.get("quality_adjustment", 0.0))
+            quality_adj = float(parsed.get("quality_adjustment", parsed.get("adjustment", 0.0)))
             quality_adj = max(-MAX_QUALITY_ADJUSTMENT, min(MAX_QUALITY_ADJUSTMENT, quality_adj))
 
-            setup_quality = str(parsed.get("setup_quality", "fair")).lower()
+            setup_quality = str(parsed.get("setup_quality", parsed.get("level", "fair"))).lower()
             comment = str(parsed.get("comment", ""))[:100]
 
+            # ✅ طباعة تعليق ليما بسطر مستقل ومنفصل تماماً
             print(f"🦙 Llama [Quality] → adj={quality_adj:+.2f} | quality={setup_quality} | {comment}")
 
             return {
@@ -315,8 +329,8 @@ def _review_llama(price, direction, features):
 # ══════════════════════════════
 def review(row, final_score, direction, price, pattern_stats=None):
     """
-    ✅ الدالة الجديدة — AI كمستشارين فقط
-    
+    ✅ الدالة الرئيسية — AI كمستشارين فقط
+   
     Returns:
         verdict: دائماً "APPROVE" (لأن AI ما يمنع)
         reason: ملخص النتيجة
