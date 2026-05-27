@@ -12,6 +12,15 @@ from features import extract_all_features
 from news_filter import should_trade
 from memory import save_signal_memory, should_block_signal
 
+# ✅ AI Advisors (Observer Mode)
+try:
+    from ai_reviewer import review as ai_review, init_db as ai_init_db
+    ai_init_db()
+    AI_ENABLED = True
+except Exception as e:
+    print(f"⚠️ AI Reviewer غير متاح: {e}")
+    AI_ENABLED = False
+
 load_dotenv()
 
 SYMBOLS = ["BTC-USDT", "SOL-USDT", "DOGE-USDT", "BNB-USDT", "XRP-USDT"]
@@ -349,6 +358,24 @@ async def process_symbol(session, symbol):
 
             signal_id = f"{symbol.replace('-', '')}-{int(time.time())}"
 
+            # ✅ AI Advisors Review (Groq + Llama) — Observer Mode
+            groq_comment = ""
+            llama_comment = ""
+            ai_final_confidence = confidence
+            if AI_ENABLED:
+                try:
+                    base_score = min(confidence / 4.0, 1.0) # تحويل لـ 0-1
+                    ai_verdict, ai_reason, groq_comment, llama_comment = ai_review(
+                        row=last_row.to_dict(),
+                        final_score=base_score,
+                        direction=final_direction,
+                        price=current_close,
+                        pattern_stats=None
+                    )
+                    print(f"🧠 [AI Advisors] {symbol} → {ai_reason}")
+                except Exception as e:
+                    print(f"⚠️ AI Review failed: {e}")
+
             signal_payload = {
                 "signal_id": signal_id,
                 "symbol": symbol,
@@ -364,6 +391,9 @@ async def process_symbol(session, symbol):
                 "entry_quality": entry_quality,
                 "market_state": market_state,
                 "strategy_id": strategy_id,
+                "confidence": round(confidence, 4), # ✅ إضافة confidence
+                "groq_reason": groq_comment, # ✅ تعليق Groq
+                "or_reason": llama_comment, # ✅ تعليق Llama
                 "quant_metrics": {
                     "zscore": round(current_zscore, 2),
                     "entropy": round(current_entropy, 2),
