@@ -1,3 +1,4 @@
+
 import os
 import json
 import asyncio
@@ -88,10 +89,6 @@ def get_daily_trend(df_1d: pd.DataFrame) -> str:
         return "NEUTRAL"
 
 def detect_market_state(entropy: float, zscore: float, macro_htf: str) -> str:
-    """
-    ✅ Adaptive Market State Detector
-    يحدد حالة السوق: clean / normal / noisy
-    """
     if entropy < 0.4 and abs(zscore) > 0.8:
         return "clean"
     elif entropy > 0.7:
@@ -195,20 +192,16 @@ async def process_symbol(session, symbol):
         current_entropy = float(last_row["1m_entropy"])
         current_fourier = float(last_row["1m_fourier"])
 
-        # ✅ حماية NaN/inf
         if not np.isfinite(current_zscore): return
         if not np.isfinite(current_entropy): return
         if not np.isfinite(current_fourier): return
 
-        # ⚡ فلتر السوق المتقلب
         if micro_regime == "volatile":
             print(f"⚡ {symbol} — تجاهل السوق المتقلب")
             return
 
-        # ✅ Adaptive Market State
         market_state = detect_market_state(current_entropy, current_zscore, macro_htf)
 
-        # ✅ فلاتر تتكيف مع حالة السوق
         if market_state == "clean":
             min_z_ranging = 0.3
             min_z_trending = 0.5
@@ -217,12 +210,11 @@ async def process_symbol(session, symbol):
             min_z_ranging = 0.5
             min_z_trending = 0.8
             confidence_threshold = 0.85
-        else: # normal
+        else:
             min_z_ranging = 0.35
             min_z_trending = 0.65
             confidence_threshold = 0.75
 
-        # zscore filter حسب regime وحالة السوق
         if micro_regime == "ranging":
             min_z = min_z_ranging
         else:
@@ -231,14 +223,12 @@ async def process_symbol(session, symbol):
         if abs(current_zscore) < min_z:
             return
 
-        # confidence gate متكيف
         confidence = abs(current_zscore) * (2 - current_entropy)
         if confidence < confidence_threshold:
             return
 
         strategy_data = await get_best_live_strategy_async(symbol, micro_regime)
 
-        # strategy validation
         if "params" not in strategy_data:
             return
         if not isinstance(strategy_data.get("params"), dict):
@@ -249,7 +239,6 @@ async def process_symbol(session, symbol):
         sl_pct = float(strategy_data["sl_pct"])
         strategy_id = strategy_data.get("strategy_id", "gen_plan_3")
 
-        # trend confirmation — أقل صرامة في السوق النظيف
         trend_confirmed = (macro_daily == macro_htf) and macro_htf != "NEUTRAL"
 
         signal_direction = None
@@ -262,7 +251,6 @@ async def process_symbol(session, symbol):
                     signal_direction = "BUY"
 
         elif micro_regime == "trending":
-            # في السوق النظيف — trend confirmation أخف
             if market_state == "clean":
                 trend_ok = macro_htf != "NEUTRAL"
             else:
@@ -278,7 +266,6 @@ async def process_symbol(session, symbol):
         if signal_direction:
             final_direction = "LONG" if signal_direction == "BUY" else "SHORT"
 
-            # Macro Shield
             if final_direction == "SHORT" and (macro_htf == "UP" or macro_daily == "UP"):
                 print(f"🛑 [Macro Shield] {symbol} — رفض SHORT ⬆️")
                 return
@@ -302,7 +289,6 @@ async def process_symbol(session, symbol):
 
             precision = get_price_precision(symbol)
 
-            # entry quality
             if abs(current_zscore) >= params.get('z_trigger', 1.5) + 0.5:
                 entry_quality = "early"
             elif abs(current_zscore) <= params.get('z_trigger', 1.5) - 0.2:
@@ -310,12 +296,10 @@ async def process_symbol(session, symbol):
             else:
                 entry_quality = "middle"
 
-            # vol_factor
             vol_factor = min(max(abs(current_zscore), 1.0), 2.0)
             vol_factor *= (1 + current_entropy * 0.5)
             vol_factor = min(vol_factor, 2.0)
 
-            # Risk Multiplier
             if abs(current_zscore) > 2.0:
                 risk_mult = 1.2
             elif abs(current_zscore) < 1.2:
@@ -344,8 +328,6 @@ async def process_symbol(session, symbol):
             else:
                 adaptive_tp_pct = tp_pct * vol_factor * risk_mult
                 adaptive_sl_pct = sl_pct * vol_factor * risk_mult
-
-                # ✅ TP cap للترند — منع TP المبالغ فيه
                 adaptive_tp_pct = min(adaptive_tp_pct, 0.0065)
                 adaptive_sl_pct = min(adaptive_sl_pct, 0.0045)
 
@@ -358,13 +340,12 @@ async def process_symbol(session, symbol):
 
             signal_id = f"{symbol.replace('-', '')}-{int(time.time())}"
 
-            # ✅ AI Advisors Review (Groq + Llama) — Observer Mode
             groq_comment = ""
             llama_comment = ""
             ai_final_confidence = confidence
             if AI_ENABLED:
                 try:
-                    base_score = min(confidence / 4.0, 1.0) # تحويل لـ 0-1
+                    base_score = min(confidence / 4.0, 1.0)
                     ai_verdict, ai_reason, groq_comment, llama_comment = ai_review(
                         row=last_row.to_dict(),
                         final_score=base_score,
@@ -375,6 +356,9 @@ async def process_symbol(session, symbol):
                     print(f"🧠 [AI Advisors] {symbol} → {ai_reason}")
                 except Exception as e:
                     print(f"⚠️ AI Review failed: {e}")
+
+            # ✅ إصلاح: تحويل confidence من نظام 0-4 إلى 0-100
+            confidence_pct = round(min(confidence / 4.0, 1.0) * 100, 1)
 
             signal_payload = {
                 "signal_id": signal_id,
@@ -391,9 +375,9 @@ async def process_symbol(session, symbol):
                 "entry_quality": entry_quality,
                 "market_state": market_state,
                 "strategy_id": strategy_id,
-                "confidence": round(confidence, 4), # ✅ إضافة confidence
-                "groq_reason": groq_comment, # ✅ تعليق Groq
-                "or_reason": llama_comment, # ✅ تعليق Llama
+                "confidence": confidence_pct, # ✅ هلق بين 0-100
+                "groq_reason": groq_comment,
+                "or_reason": llama_comment,
                 "quant_metrics": {
                     "zscore": round(current_zscore, 2),
                     "entropy": round(current_entropy, 2),
@@ -408,7 +392,7 @@ async def process_symbol(session, symbol):
             await set_signal_cooldown(symbol, multiplier=cooldown_mult)
 
             await save_signal_memory(redis_client, signal_id, signal_payload)
-            print(f"🎯 إشارة: {symbol} -> {final_direction} | Micro: {micro_regime.upper()} | State: {market_state.upper()} | H4: {macro_htf} | ID: {signal_id}")
+            print(f"🎯 إشارة: {symbol} -> {final_direction} | Confidence: {confidence_pct}% | Micro: {micro_regime.upper()} | State: {market_state.upper()} | H4: {macro_htf} | ID: {signal_id}")
 
     except Exception as e:
         print(f"❌ خطأ معالجة {symbol}: {e}")
