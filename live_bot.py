@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from features import extract_all_features
 from news_filter import should_trade
 from memory import save_signal_memory, should_block_signal
-from signal_scorer import compute_confidence
+from quant_scorer import compute_confidence
 
 try:
     from ai_reviewer import review as ai_review, init_db as ai_init_db
