@@ -265,9 +265,8 @@ def risk_engine(confidence, final_direction, macro_htf, current_zscore, long_pro
         print(f" ⚠️ [Risk] Macro penalty SHORT vs UP → {penalty:.2f}")
 
     if final_direction == "LONG" and macro_htf == "DOWN":
-        penalty = 0.6 + (0.4 * abs(current_zscore) / 2)
-        confidence *= penalty
-        print(f" ⚠️ [Risk] Macro penalty LONG vs DOWN → {penalty:.2f}")
+        print(f" 🛑 [Risk] رفض LONG — H4 هابط")
+        return confidence, False
 
     confidence = float(np.clip(confidence, 0, 100))
 
