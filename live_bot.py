@@ -369,8 +369,10 @@ async def process_symbol(session, symbol):
         else: min_z = 0.35 if micro_regime == "ranging" else 0.65
 
         # ─── ATR VOLATILITY DETECTOR ───
+        print(f"\n{'─'*50}")
+        print(f"🔍 {symbol} | H4:{macro_htf} | Daily:{macro_daily} | Regime:{micro_regime.upper()}")
         vol_regime, atr_ratio = detect_volatility_regime(df_1m)
-        print(f" 📈 [ATR] {symbol} → {vol_regime.upper()} | ratio={atr_ratio:.2f}")
+        print(f" 📈 [ATR] {vol_regime.upper()} | ratio={atr_ratio:.2f}")
 
         if vol_regime == "compressing":
             print(f" ⏸️ [ATR] {symbol} — سوق منكمش → تجاهل")
