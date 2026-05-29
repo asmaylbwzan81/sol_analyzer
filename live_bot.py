@@ -272,7 +272,7 @@ def risk_engine(confidence, final_direction, macro_htf, current_zscore, long_pro
     confidence = float(np.clip(confidence, 0, 100))
 
     # quality gate
-    if confidence < 60:
+    if confidence < 66:
         print(f" ❌ [Risk] confidence={confidence:.1f} < 60 → رفض")
         return confidence, False
 
