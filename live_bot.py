@@ -196,9 +196,18 @@ def signal_engine(last_row, micro_regime, macro_htf) -> tuple:
     """
     يرجع: (signal_direction, long_prob, short_prob) أو None
     """
-    zscore = float(last_row.get("1m_zscore_20", 0))
-    momentum = float(last_row.get("1m_momentum_10", 0))
+    # ─── 1m features ───
+    zscore_1m = float(last_row.get("1m_zscore_20", 0))
+    momentum_1m = float(last_row.get("1m_momentum_10", 0))
     volume = float(last_row.get("volume", 1))
+
+    # ─── 5m features ───
+    zscore_5m = float(last_row.get("5m_zscore_20", 0))
+    momentum_5m = float(last_row.get("5m_momentum_10", 0))
+
+    # ─── دمج 1m و 5m (وزن 60% للـ 1m و 40% للـ 5m) ───
+    zscore = zscore_1m * 0.6 + zscore_5m * 0.4
+    momentum = momentum_1m * 0.6 + momentum_5m * 0.4
 
     long_score = max(0, -zscore) + max(0, momentum)
     short_score = max(0, zscore) + max(0, -momentum)
@@ -271,7 +280,7 @@ def risk_engine(confidence, final_direction, macro_htf, current_zscore, long_pro
     confidence = float(np.clip(confidence, 0, 100))
 
     # quality gate
-    if confidence < 66:
+    if confidence < 60:
         print(f" ❌ [Risk] confidence={confidence:.1f} < 60 → رفض")
         return confidence, False
 
@@ -393,6 +402,14 @@ async def process_symbol(session, symbol):
         # ─── LAYER 1: SIGNAL ENGINE ───
         raw_direction, long_prob, short_prob = signal_engine(last_row, micro_regime, macro_htf)
         if raw_direction is None:
+            return
+
+        # ✅ فلتر H4 — لا ندخل عكس الترند الكبير
+        if macro_htf == "DOWN" and raw_direction == "BUY":
+            print(f" 🛑 [H4 Filter] {symbol} — رفض LONG لأن H4 هابط")
+            return
+        if macro_htf == "UP" and raw_direction == "SELL":
+            print(f" 🛑 [H4 Filter] {symbol} — رفض SHORT لأن H4 صاعد")
             return
 
         final_direction = "LONG" if raw_direction == "BUY" else "SHORT"
