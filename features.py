@@ -65,16 +65,45 @@ def calc_fourier_strength(series, window=WINDOW_SHORT):
     return series.rolling(window).apply(_rolling_fourier, raw=True).fillna(0)
 
 def detect_regime(df, window=50):
-    returns = df["close"].pct_change()
+    close = df["close"]
+    returns = close.pct_change()
+
+    # 1️⃣ Trend Strength — linear regression slope
+    def trend_slope(x):
+        if len(x) < 5: return 0.0
+        y = np.array(x)
+        t = np.arange(len(y))
+        slope, _ = np.polyfit(t, y, 1)
+        return slope / (y.mean() + 1e-10)
+
+    trend_strength = close.rolling(window).apply(trend_slope, raw=True).fillna(0)
+
+    # 2️⃣ Volatility — ATR-based ratio
     vol = returns.rolling(window).std()
-    vol_mean = vol.rolling(window * 2).mean()
-    price = df["close"]
-    trend_strength = price.pct_change(window)
-    trend_signal = trend_strength.rolling(window).mean()
+    vol_mean= vol.rolling(window * 2).mean()
+    vol_ratio = vol / (vol_mean + 1e-10)
+
+    # 3️⃣ Noise — entropy-based
+    def noise_level(x):
+        r = np.diff(x) / (x[:-1] + 1e-10)
+        h, _ = np.histogram(r, bins=8)
+        h = h + 1e-10
+        p = h / h.sum()
+        return float(-np.sum(p * np.log(p))) / np.log(8)
+
+    noise = close.rolling(window).apply(noise_level, raw=True).fillna(0.5)
+
+    # ─── القرار النهائي ───
     regime = pd.Series("ranging", index=df.index)
-    regime[trend_signal > 0.002] = "trending"
-    regime[trend_signal < -0.002] = "trending"
-    regime[vol > vol_mean * 1.8] = "volatile"
+
+    # trending: ترند قوي + noise منخفض
+    trending_mask = (trend_strength.abs() > 0.0008) & (noise < 0.75)
+    regime[trending_mask] = "trending"
+
+    # volatile: تذبذب عالي
+    volatile_mask = vol_ratio > 1.8
+    regime[volatile_mask] = "volatile"
+
     return regime
 
 def extract_features(df, prefix=""):
@@ -151,6 +180,37 @@ def extract_all_features(symbol_data):
     df_1m_feats[numeric_cols] = df_1m_feats[numeric_cols].fillna(0)
 
     return df_1m_feats
+
+
+def compute_regime_confidence(df_1m, df_5m, df_15m):
+    """
+    يرجع: (regime_bias, confidence 0-100)
+    """
+    def safe_last_regime(df):
+        if df is None or df.empty:
+            return "unknown"
+        r = detect_regime(df)
+        return str(r.iloc[-1]) if r is not None and len(r) else "unknown"
+
+    r1 = safe_last_regime(df_1m)
+    r5 = safe_last_regime(df_5m)
+    r15 = safe_last_regime(df_15m)
+
+    regimes = [r for r in [r1, r5, r15] if r != "unknown"]
+    if not regimes:
+        return "ranging", 0.0
+
+    counts = {u: regimes.count(u) for u in set(regimes)}
+    dominant = max(counts, key=counts.get)
+
+    score = 0.0
+    weight_sum = 0.0
+    if r1 != "unknown": score += (r1 == dominant) * 1.0; weight_sum += 1.0
+    if r5 != "unknown": score += (r5 == dominant) * 1.5; weight_sum += 1.5
+    if r15 != "unknown": score += (r15 == dominant) * 2.0; weight_sum += 2.0
+
+    confidence = (score / (weight_sum + 1e-9)) * 100
+    return dominant, round(confidence, 2)
 
 
 FEATURE_NAMES_1M = [f"1m_{x}" for x in ["zscore_20", "zscore_50", "mean_rev_20", "mean_rev_50", "momentum_5", "momentum_10", "momentum_20", "volatility_20", "vol_ratio", "close_position", "price_range", "autocorr", "entropy", "fourier", "returns", "returns_5"]]
