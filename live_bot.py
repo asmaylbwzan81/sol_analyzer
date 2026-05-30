@@ -8,7 +8,7 @@ import numpy as np
 from upstash_redis.asyncio import Redis
 from dotenv import load_dotenv
 
-from features import extract_all_features
+from features import extract_all_features, compute_regime_confidence
 from news_filter import should_trade
 from memory import save_signal_memory, should_block_signal
 from quant_scorer import compute_confidence
@@ -290,7 +290,7 @@ def risk_engine(confidence, final_direction, macro_htf, current_zscore, long_pro
     confidence = float(np.clip(confidence, 0, 100))
 
     # quality gate
-    if confidence < 65:
+    if confidence < 60:
         print(f" ❌ [Risk] confidence={confidence:.1f} < 60 → رفض")
         return confidence, False
 
@@ -393,6 +393,19 @@ async def process_symbol(session, symbol):
         vol_regime, atr_ratio = detect_volatility_regime(df_1m)
         print(f" 📈 [ATR] {vol_regime.upper()} | ratio={atr_ratio:.2f}")
 
+        # ─── REGIME CONFIDENCE ───
+        regime_bias, regime_conf = compute_regime_confidence(df_1m, df_5m, df_15m)
+        print(f" 📊 [Regime] bias={regime_bias} | confidence={regime_conf}%")
+
+        if regime_conf < 50:
+            confidence_multiplier = 0.70
+        elif regime_conf < 70:
+            confidence_multiplier = 0.85
+        elif regime_conf < 85:
+            confidence_multiplier = 1.0
+        else:
+            confidence_multiplier = 1.15
+
         if vol_regime == "compressing":
             print(f" ⏸️ [ATR] {symbol} — سوق منكمش → تجاهل")
             return
@@ -433,6 +446,10 @@ async def process_symbol(session, symbol):
             atr_boost = min(1.0 + (atr_ratio - 1.3) * 0.3, 1.2)
             confidence = min(confidence * atr_boost, 100)
             print(f" 🚀 [ATR Boost] confidence × {atr_boost:.2f} → {confidence:.1f}")
+
+        # Regime confidence multiplier
+        confidence = float(np.clip(confidence * confidence_multiplier, 0, 100))
+        print(f" 📊 [Regime Mult] ×{confidence_multiplier} → {confidence:.1f}")
 
         # ─── LAYER 3: RISK ENGINE ───
         confidence, approved = risk_engine(confidence, final_direction, macro_htf, current_zscore, long_prob, short_prob)
