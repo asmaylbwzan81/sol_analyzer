@@ -145,12 +145,19 @@ async def get_best_live_strategy_async(symbol, market_regime):
         f"strategy_best_2:{coin_clean}:{regime_upper}",
         f"strategy_best_3:{coin_clean}:{regime_upper}"
     ]
+    # ✅ طلب واحد بدل 3
+    try:
+        raw_list = await redis_client.mget(*slots_keys)
+    except:
+        raw_list = []
+
     strategies = []
-    for key in slots_keys:
-        raw_data = await redis_client.get(key)
+    for raw_data in (raw_list or []):
         if raw_data:
-            if isinstance(raw_data, str): strategies.append(json.loads(raw_data))
-            else: strategies.append(raw_data)
+            try:
+                strategies.append(json.loads(raw_data) if isinstance(raw_data, str) else raw_data)
+            except: pass
+
     if not strategies:
         return {
             "params": {"entropy_max": 0.6, "fourier_min": 0.04, "z_trigger": 1.5},
